@@ -7,6 +7,7 @@ mod clip_store;
 mod decode_budget;
 mod emit;
 mod entity_events;
+mod external;
 mod frontend;
 mod media_queue;
 mod messages;
@@ -27,6 +28,7 @@ pub use aliases::{
 pub use ambient::{MapAmbientBooted, SoundIwd};
 pub use clip_store::{ClipPath, ClipPathCost, ClipPrepCost, ClipStore, clip_prep_cost};
 pub use emit::{BobCycleTracker, emit_footstep_on_bob_wrap, emit_weapon_fire};
+pub use external::{ExternalClip, ExternalSound};
 pub use frontend::FrontendAudio;
 pub use match_set::{AudioReady, AudioSilent};
 pub use messages::{

@@ -76,13 +76,21 @@ pub(crate) fn update_reticle(
     settings: Res<frame::GameSettings>,
     cg_clock: Res<FrameClock>,
     mut quads: Query<(&ReticleQuad, &mut Node, &mut ImageNode, &mut UiTransform)>,
-    life: (MessageReader<LifeStarted>, Res<ViewSubject>),
+    life: (
+        MessageReader<LifeStarted>,
+        Res<ViewSubject>,
+        Res<frame::DishonoredMode>,
+    ),
 ) {
-    let (mut started, view) = life;
+    let (mut started, view, dishonored) = life;
     for ev in started.read() {
         if ev.client == local.0.0 {
             *ads_latch = ReticleAdsLatch::default();
         }
+    }
+    if dishonored.active {
+        hide_all(&mut quads);
+        return;
     }
     if !surface.is_ready() {
         return;

@@ -207,6 +207,8 @@ pub struct SimState {
 
     pending_final_kill: Option<(ClientId, ClientId)>,
 
+    pub(crate) external_motion: std::collections::HashSet<ClientId>,
+
     last_pmove_walking: HashMap<ClientId, i32>,
 
     stuck_holdrand: u32,
@@ -287,6 +289,7 @@ impl Default for SimState {
             weapon_notes: Vec::new(),
             presentation: PresentationQueue::default(),
             pending_final_kill: None,
+            external_motion: Default::default(),
             last_pmove_walking: HashMap::new(),
             stuck_holdrand: 0,
             last_stuck_ejects: Vec::new(),
@@ -1077,6 +1080,7 @@ impl SimState {
         self.clients.retain(|(c, _)| *c != id);
         self.player_bodies.forget_client(id);
         self.collision_runtime.forget_client(id);
+        self.external_motion.remove(&id);
         self.last_pmove_walking.remove(&id);
         self.last_anim_movement.remove(&id);
         self.anim_command_buttons.remove(&id);

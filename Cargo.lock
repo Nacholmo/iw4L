@@ -2139,6 +2139,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cascade"
+version = "0.1.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.1.0#5ed24f771b77c7d8e5bfc3d62ae0369538f2f9f1"
+dependencies = [
+ "glam",
+ "upk",
+]
+
+[[package]]
 name = "cc"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2614,6 +2623,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "dis_data"
+version = "0.1.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.1.0#5ed24f771b77c7d8e5bfc3d62ae0369538f2f9f1"
+dependencies = [
+ "cascade",
+ "edge_anim",
+ "upk",
+ "wwise",
+]
+
+[[package]]
+name = "dis_motion"
+version = "0.1.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.1.0#5ed24f771b77c7d8e5bfc3d62ae0369538f2f9f1"
+dependencies = [
+ "dis_data",
+ "glam",
+]
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2701,6 +2730,14 @@ dependencies = [
 [[package]]
 name = "dxbc_sm5"
 version = "0.1.0"
+
+[[package]]
+name = "edge_anim"
+version = "0.1.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.1.0#5ed24f771b77c7d8e5bfc3d62ae0369538f2f9f1"
+dependencies = [
+ "glam",
+]
 
 [[package]]
 name = "either"
@@ -3913,6 +3950,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
+name = "lewton"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "777b48df9aaab155475a83a7df3070395ea1ac6902f5cd062b8f2b028075c030"
+dependencies = [
+ "byteorder",
+ "ogg",
+ "tinyvec",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4738,6 +4786,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ogg"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6951b4e8bf21c8193da321bcce9c9dd2e13c858fe078bf9054a288b419ae5d6e"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5338,15 +5395,22 @@ dependencies = [
  "audio",
  "bevy",
  "bytemuck",
+ "cascade",
  "diag",
+ "dis_data",
+ "dis_motion",
  "dpvs_iw4",
+ "edge_anim",
  "entity_iw4",
  "frame",
  "fx",
  "fx_iw4",
+ "glam",
  "hud_iw4",
+ "lewton",
  "lighting_iw4",
  "math_iw4",
+ "movement_iw4",
  "net",
  "perf",
  "playerstate_iw4",
@@ -5354,7 +5418,10 @@ dependencies = [
  "render_material",
  "render_scene",
  "sim",
+ "trace_iw4",
+ "upk",
  "weapon_iw4",
+ "wwise",
  "xmodel_runtime",
 ]
 
@@ -6860,6 +6927,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "upk"
+version = "0.1.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.1.0#5ed24f771b77c7d8e5bfc3d62ae0369538f2f9f1"
+dependencies = [
+ "lzokay-native",
+]
+
+[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7710,6 +7785,26 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
+
+[[package]]
+name = "ww2ogg"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a16960726d0260e04dabd2b0036fbdacecefec9d115dc4b953086c3809685a23"
+dependencies = [
+ "byteorder",
+ "lewton",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "wwise"
+version = "0.1.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.1.0#5ed24f771b77c7d8e5bfc3d62ae0369538f2f9f1"
+dependencies = [
+ "lewton",
+ "ww2ogg",
+]
 
 [[package]]
 name = "x11-dl"

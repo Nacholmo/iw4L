@@ -38,6 +38,10 @@ binary, with their licence and copyright texts, are listed in
 THIRD-PARTY-LICENSES.txt; the binary embeds that file and `iw4l licenses`
 prints it. `cargo xtask licenses` regenerates it from Cargo.lock.
 
+Dishonored mode links the crates of sinhonor
+(https://github.com/Nacholmo/sinhonor, MIT OR Apache-2.0) as a git dependency.
+Its NOTES.md names the projects it consulted.
+
 --------------------------------------------------------------------------------
 References consulted during development
 --------------------------------------------------------------------------------
@@ -91,8 +95,10 @@ OxideAV WMA — https://github.com/OxideAV/oxideav-wma
 Game content
 --------------------------------------------------------------------------------
 
-No Call of Duty game data is contained in this repository or in any IW4L
-release archive. IW4L reads game data from a copy of the game the user already
+No Call of Duty or Dishonored game data is contained in this repository or in
+any IW4L release archive. Dishonored mode reads Dishonored's data from the
+user's own install at runtime; Dishonored belongs to ZeniMax Media and Arkane
+Studios. IW4L reads game data from a copy of the game the user already
 owns and has installed. Call of Duty, Modern Warfare, Black Ops, related
 trademarks and all original game assets belong to their respective owners.
 IW4L is not affiliated with, endorsed by or supported by them.

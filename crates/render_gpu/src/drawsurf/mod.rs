@@ -2,6 +2,7 @@ mod admitted;
 mod backend;
 mod colour_submit;
 mod depth_range;
+mod dishonored;
 mod draw;
 mod exact_pipeline;
 mod floatz;

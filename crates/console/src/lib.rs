@@ -22,6 +22,7 @@ mod debug_smc;
 mod debug_view_proj;
 mod debug_vision;
 mod diagnostics;
+mod dishonored;
 pub mod editor;
 mod feature_dispatch;
 mod frontend;

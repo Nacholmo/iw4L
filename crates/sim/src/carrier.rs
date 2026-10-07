@@ -298,6 +298,23 @@ impl SimWorld {
         self.frame().set_origin(id, origin)
     }
 
+    pub fn set_external_motion(&mut self, id: ClientId, enabled: bool) {
+        let mut frame = self.frame();
+        if enabled {
+            frame.external_motion.insert(id);
+        } else {
+            frame.external_motion.remove(&id);
+        }
+    }
+
+    pub fn with_player_clip<R>(
+        &mut self,
+        id: ClientId,
+        f: impl FnOnce(&dyn Fn(movement_iw4::GroundTraceInput) -> trace_iw4::Trace) -> R,
+    ) -> R {
+        crate::step::with_player_clip(&mut self.frame(), id, f)
+    }
+
     pub fn set_legs_anim(&mut self, id: ClientId, legs_anim: i32) -> bool {
         self.frame().set_legs_anim(id, legs_anim)
     }

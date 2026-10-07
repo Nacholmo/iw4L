@@ -815,14 +815,22 @@ pub fn sample_client_input(
     mut request_ids: Option<ResMut<crate::ActionRequestIds>>,
     view: Option<Res<frame::ViewSubject>>,
     trace: Option<ResMut<ClientPhaseTrace>>,
-    aim_cursor: (ResMut<LocationCursor>, Res<crate::ViewweaponAim>),
+    aim_cursor: (
+        ResMut<LocationCursor>,
+        Res<crate::ViewweaponAim>,
+        Option<Res<frame::DishonoredMode>>,
+    ),
 ) {
-    let (mut cursor, aim) = aim_cursor;
+    let (mut cursor, aim, dishonored) = aim_cursor;
     push_phase(trace, "Input");
     if !gate.local_cmds_enabled {
         actions.client.weapon_cycles.clear();
         actions.client.action_slots.clear();
         return;
+    }
+    if dishonored.as_ref().is_some_and(|mode| mode.active) {
+        actions.client.weapon_cycles.clear();
+        actions.client.action_slots.clear();
     }
     actions.frame_msec = key_frame_msec(time.delta_secs());
     actions.now_msec = frame_time_msec(time.elapsed_secs());
@@ -1168,6 +1176,11 @@ pub fn sample_client_input(
     {
         cmd.melee_charge_yaw = yaw;
         cmd.melee_charge_dist = dist;
+    }
+    if dishonored.is_some_and(|mode| mode.active) {
+        cmd.forwardmove = 0;
+        cmd.rightmove = 0;
+        cmd.buttons = 0;
     }
     template.cmd = cmd;
     template.ready = true;

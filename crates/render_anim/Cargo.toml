@@ -36,6 +36,16 @@ sim.workspace = true
 weapon_iw4.workspace = true
 xmodel_runtime.workspace = true
 bevy.workspace = true
+cascade.workspace = true
+dis_data.workspace = true
+dis_motion.workspace = true
+edge_anim.workspace = true
+glam.workspace = true
+lewton.workspace = true
+movement_iw4.workspace = true
+trace_iw4.workspace = true
+upk.workspace = true
+wwise.workspace = true
 bytemuck = { version = "1", features = ["derive"] }
 
 [lints]

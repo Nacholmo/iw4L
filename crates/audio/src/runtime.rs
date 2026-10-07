@@ -13,6 +13,7 @@ use crate::cue::{CueFailure, CueHandle, CueRequest, CueResolver};
 use crate::cue_execution::{
     CueCancellation, CueIntent, CueLease, CueMix, CueStep, CueTrigger, CueWork,
 };
+use crate::external::{ExternalClip, ExternalSound, ExternalStart};
 use crate::media::RenderMedia;
 use crate::render_core::{
     Assignment, AudioScope, InstanceState, InstanceStatus, PHYSICAL_VOICES, QUANTUM, RenderShared,
@@ -26,6 +27,8 @@ use std::collections::VecDeque;
 
 pub const LOGICAL_INSTANCES: usize = 2048;
 const CONTROL_BATCH: usize = 64;
+const EXTERNAL_QUEUE: usize = 256;
+const EXTERNAL_START_WAIT: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug)]
 pub struct AudioDiagnostics {
@@ -79,6 +82,7 @@ struct LogicalInstance {
 pub struct AudioRuntime {
     shared: Arc<RenderShared>,
     cue_tx: SyncSender<CueRequest>,
+    external_tx: SyncSender<ExternalStart>,
     media: Mutex<Option<MediaService>>,
     cue_mix: Mutex<Option<CueMix>>,
     cue_cancellation: CueCancellation,
@@ -107,6 +111,7 @@ impl AudioRuntime {
             .store(device_enabled, Ordering::Relaxed);
         let shutdown = Arc::new(AtomicBool::new(false));
         let (cue_tx, cue_rx) = sync_channel(LOGICAL_INSTANCES);
+        let (external_tx, external_rx) = sync_channel(EXTERNAL_QUEUE);
         let thread_shared = shared.clone();
         let thread_shutdown = shutdown.clone();
         let sources = Arc::new(SourceInbox::new());
@@ -129,6 +134,7 @@ impl AudioRuntime {
                     thread_shared,
                     thread_shutdown,
                     cue_rx,
+                    external_rx,
                     device_enabled,
                     control_sources,
                     control_listener,
@@ -143,6 +149,7 @@ impl AudioRuntime {
         Self {
             shared,
             cue_tx,
+            external_tx,
             media: Mutex::new(None),
             cue_mix: Mutex::new(None),
             cue_cancellation: CueCancellation::default(),
@@ -306,6 +313,18 @@ impl AudioRuntime {
         self.event_context.set(context);
     }
 
+    pub fn play_external(&self, clip: &ExternalClip, gain: f32) -> ExternalSound {
+        let handle = ExternalSound::default();
+        if !self.shared.cancelled.load(Ordering::Acquire) {
+            let _ = self.external_tx.try_send(ExternalStart {
+                media: clip.media.clone(),
+                gain,
+                handle: handle.clone(),
+            });
+        }
+        handle
+    }
+
     pub(crate) fn trigger_cue(&self, request: CueTrigger) -> CueHandle {
         self.trigger_with_fade(request, None)
     }
@@ -422,6 +441,7 @@ fn control(
     shared: Arc<RenderShared>,
     shutdown: Arc<AtomicBool>,
     cue_rx: Receiver<CueRequest>,
+    external_rx: Receiver<ExternalStart>,
     device_enabled: bool,
     sources: Arc<SourceInbox>,
     listener: Arc<ListenerState>,
@@ -878,6 +898,43 @@ fn control(
                     pending_cues.push_back(child);
                 }
             }
+        }
+        for _ in 0..CONTROL_BATCH {
+            let Ok(start) = external_rx.try_recv() else {
+                break;
+            };
+            let admission = AdmissionPolicy::default();
+            let instance = make_instance(
+                next_id.fetch_add(1, Ordering::Relaxed),
+                AudioScope::Menu,
+                0,
+                &admission,
+                Instant::now(),
+            );
+            set_parameters(&instance, start.gain, 1.0, true);
+            admit(
+                StartRequest {
+                    event: None,
+                    start_deadline: Some(Instant::now() + EXTERNAL_START_WAIT),
+                    protect_attack: false,
+                    cancellation: None,
+                    spatial: None,
+                    admission,
+                    media: start.media,
+                    instance: instance.clone(),
+                    looping: false,
+                    frame: shared.frame.load(Ordering::Acquire),
+                },
+                &shared,
+                &mut instances,
+                listener,
+                &rejections,
+                None,
+            );
+            if let Some(reason) = instance.rejection() {
+                diag::debug!(Audio, "external clip refused: {reason:?}");
+            }
+            let _ = start.handle.0.set(instance);
         }
         let diag_stage = crate::diagnostics::slow_stage("cue_steps", diag_stage);
         apply_source_render_budget(&instances);

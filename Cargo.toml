@@ -112,6 +112,13 @@ serde_json = "1"
 async-lock = "3"
 sha2 = "0.10"
 png = "0.18"
+cascade = { git = "https://github.com/Nacholmo/sinhonor", tag = "v0.1.0" }
+dis_data = { git = "https://github.com/Nacholmo/sinhonor", tag = "v0.1.0" }
+dis_motion = { git = "https://github.com/Nacholmo/sinhonor", tag = "v0.1.0" }
+edge_anim = { git = "https://github.com/Nacholmo/sinhonor", tag = "v0.1.0" }
+upk = { git = "https://github.com/Nacholmo/sinhonor", tag = "v0.1.0" }
+wwise = { git = "https://github.com/Nacholmo/sinhonor", tag = "v0.1.0" }
+lewton = "0.10"
 anim_iw4 = { path = "crates/anim_iw4" }
 asset_iw4 = { path = "crates/asset_iw4" }
 asset_core = { path = "crates/asset_core" }

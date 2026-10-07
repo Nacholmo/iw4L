@@ -32,4 +32,5 @@ pub(crate) fn register_drawsurf_render(app: &mut App) {
     super::iw_tess::register(app);
     super::model_lighting_tiles::register(app);
     super::geometry_diagnostic::register(app);
+    super::dishonored::register(app);
 }

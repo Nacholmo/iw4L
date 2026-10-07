@@ -27,4 +27,5 @@ game. Keep them this short: nobody opens a long file twice.
 | [`SKILL.md`](SKILL.md) | local Elo ratings, account persistence and migration | changing skill updates or account synchronization |
 | [`GSC-RUNTIME.md`](GSC-RUNTIME.md) | GSC → executable IR → Bevy runtime; args, arrays and tables still share one `Runtime` | implementing gameplay or script execution |
 | [`GSC-POSTFX.md`](GSC-POSTFX.md) | script vision, color correction, blur, DoF and bloom | authoring or debugging GSC post effects |
+| [`DISHONORED.md`](DISHONORED.md) | K swaps the soldier for Corvo: sinhonor's motion on PMove's collision, his arms, Blink, effects and sounds from your Dishonored install | trying or changing Dishonored mode |
 | [`BOTS.md`](BOTS.md) | host AI: the per-tick pipeline, what a probe that never ran may not claim, the shared query budget, resumable routes, fighting from a position | bot decisions, bot movement, "why is it standing there" |

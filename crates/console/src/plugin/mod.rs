@@ -188,6 +188,7 @@ impl Plugin for ConsolePlugin {
                         (
                             crate::debug_move::route_debug_move_commands,
                             crate::saved_position::route_saved_position_commands,
+                            crate::dishonored::route,
                         ),
                         crate::debug_script_mover::route_debug_script_mover_commands,
                         crate::debug_draw_method::route_debug_draw_method_commands,
@@ -325,6 +326,7 @@ fn publish_client_action_input(
     mut hud_input: ResMut<frame::HudInputView>,
     settings: Res<frame::GameSettings>,
     mut out: ResMut<ClientActionInput>,
+    mut dishonored: ResMut<frame::DishonoredMode>,
     (gamepads, active, mut devices, mut physical, prediction, presented, local): (
         Query<&bevy::input::gamepad::Gamepad>,
         Res<frame::ActivePad>,
@@ -380,6 +382,15 @@ fn publish_client_action_input(
         || pad.is_some_and(|pad| pad.just_pressed(bevy::input::gamepad::GamepadButton::Start));
     let captured = !devices.focused || modal_captured;
     hud_input.console_open = console.open;
+    dishonored.input_blocked = captured;
+    let sticks = pad.is_some_and(|pad| {
+        use bevy::input::gamepad::GamepadButton as B;
+        (pad.just_pressed(B::LeftThumb) && pad.pressed(B::RightThumb))
+            || (pad.just_pressed(B::RightThumb) && pad.pressed(B::LeftThumb))
+    });
+    if !captured && (keys.just_pressed(KeyCode::KeyK) || sticks) {
+        dishonored.toggle_requested = true;
+    }
     physical.blocked.retain(|button| inputs.pressed(*button));
 
     let akimbo = prediction
@@ -744,6 +755,7 @@ fn setup_console(
     }
     crate::weapon_dispatch::register_weapon_commands(&mut registry, &weapon_completions);
     crate::debug_move::register_debug_move_commands(&mut registry);
+    crate::dishonored::register_commands(&mut registry);
     crate::saved_position::register_saved_position_commands(&mut registry);
     crate::debug_script_mover::register_debug_script_mover_commands(&mut registry);
     crate::debug_draw_method::register_debug_draw_method_commands(&mut registry);
@@ -903,7 +915,8 @@ fn setup_console(
         });
     commands.insert_resource(ConsolePrompt(prompt_entity.expect("console prompt entity")));
     commands.insert_resource(ConsoleLog(log_entity.expect("console log entity")));
-    crate::debug_move::spawn_showpos_hud(&mut commands, font);
+    crate::debug_move::spawn_showpos_hud(&mut commands, font.clone());
+    crate::dishonored::spawn_hud(&mut commands, font);
 }
 
 fn is_console_input(word: &str) -> bool {

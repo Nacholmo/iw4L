@@ -335,6 +335,14 @@ fn run_players_system(ecs: &mut World) {
                 continue;
             }
 
+            // Commands still advance command_time, or every later one reads as stale.
+            if world.external_motion.contains(id) {
+                if let Some(ps) = world.player_mut(*id) {
+                    ps.command_time = cmd.server_time;
+                }
+                continue;
+            }
+
             let old_buttons = world
                 .old_buttons_mut()
                 .iter()
@@ -2249,6 +2257,34 @@ pub(crate) fn script_slide(
         model_brushes: &model_brushes,
     };
     slide.advance(origin, &backend, mask)
+}
+
+pub(crate) fn with_player_clip<R>(
+    world: &mut FrameWorld,
+    id: ClientId,
+    f: impl FnOnce(&dyn Fn(GroundTraceInput) -> Trace) -> R,
+) -> R {
+    let content = world.content();
+    let linked_brushes: Vec<_> = world
+        .entity_collision_capabilities()
+        .iter()
+        .flat_map(|c| c.solid_brushes().iter().cloned())
+        .collect();
+    let model_brushes = world.model_movement_brushes();
+    let bodies = alive_body_clips(world);
+    let glass_damage = world.world_objects().glass_damage_pairs();
+    let backend = ClipBackend {
+        brushes: content.clip_brushes(),
+        bsp: content.clip_bsp(),
+        mesh: content.clip_mesh(),
+        glass_damage: &glass_damage,
+        bodies: &bodies,
+        self_entnum: id.0 as u16,
+        cmodels: &content.clip_cmodels().models,
+        linked_brushes: &linked_brushes,
+        model_brushes: &model_brushes,
+    };
+    f(&|input| CollisionBackend::trace(&backend, input))
 }
 
 pub(crate) fn script_mantle(

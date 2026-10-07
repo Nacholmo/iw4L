@@ -431,16 +431,21 @@ pub fn occupy_fpv_scene(
     mut submissions: MessageWriter<AnimDObjSceneSubmission>,
     presented: Res<PresentedSnapshot>,
     local: Res<LocalPresentClient>,
-    view_settings: (Res<ViewSubject>, Res<frame::GameSettings>),
+    view_settings: (
+        Res<ViewSubject>,
+        Res<frame::GameSettings>,
+        Res<frame::DishonoredMode>,
+    ),
     prepared: Res<PreparedFpv>,
     kick: Option<Res<SessionViewKick>>,
     session_vm: Option<Res<SessionViewmodel>>,
     tess: Option<Res<render_scene::TessMaterials>>,
     owners: FpvOwnerInputs,
 ) {
-    let (view, settings) = view_settings;
+    let (view, settings, dishonored) = view_settings;
     let fpv_meshes = owners.meshes.as_ref();
-    if presented.viewweapon_player(local.0).is_none()
+    if (dishonored.active && !view.in_killcam())
+        || presented.viewweapon_player(local.0).is_none()
         || presented_is_third_person(
             &presented,
             local.0,

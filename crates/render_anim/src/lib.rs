@@ -1,4 +1,5 @@
 pub mod anim;
+pub mod dishonored;
 pub mod draw;
 mod draw_build;
 pub mod gaps;

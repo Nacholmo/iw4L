@@ -13,7 +13,9 @@ those systems work.
 
 ## What you can try
 
-Explore maps, fight bots, and record and replay demos. Gameplay remains incomplete;
+Explore maps, fight bots, and record and replay demos. With Dishonored installed,
+press K in a match you host to move as Corvo, Blink included
+([Dishonored mode](docs/DISHONORED.md)). Gameplay remains incomplete;
 expect missing behavior, bugs and desyncs. The asset readers also cover MW3 and Black
 Ops.
 
