@@ -7,6 +7,8 @@ use crate::release::{file_sha256, release_dir};
 use crate::shell::{Res, capture, require_tools, run};
 
 const ASSET: &str = "iw4l-windows.zip";
+/// Releases go to this fork only, never to the IW4L repository it forks.
+const REPO: &str = "Nacholmo/iw4L";
 
 pub fn run_cli(root: &Path, args: &[String]) -> Res<()> {
     const USAGE: &str = "usage: cargo xtask github-release <tag> --notes FILE";
@@ -32,6 +34,14 @@ pub fn run_cli(root: &Path, args: &[String]) -> Res<()> {
         .as_str()
         .ok_or("deployment.json has no git")?;
     let git = |args: &[&str]| capture(Command::new("git").current_dir(root).args(args));
+    let origin = git(&["remote", "get-url", "origin"])?;
+    if !origin
+        .trim()
+        .trim_end_matches(".git")
+        .ends_with(&format!("github.com/{REPO}"))
+    {
+        return Err(format!("origin is {}, not {REPO}", origin.trim()));
+    }
     let commit = git(&["rev-parse", &format!("{rev}^{{commit}}")])?
         .trim()
         .to_string();
@@ -45,7 +55,9 @@ pub fn run_cli(root: &Path, args: &[String]) -> Res<()> {
     let asset = dir.join(ASSET);
     let want = file_sha256(&asset)?;
     let view = |fields: &str| -> Res<Value> {
-        let text = capture(Command::new("gh").args(["release", "view", tag, "--json", fields]))?;
+        let text = capture(
+            Command::new("gh").args(["--repo", REPO, "release", "view", tag, "--json", fields]),
+        )?;
         serde_json::from_str(&text).map_err(|error| error.to_string())
     };
     match view("isDraft") {
@@ -53,10 +65,18 @@ pub fn run_cli(root: &Path, args: &[String]) -> Res<()> {
             return Err(format!("{tag} is already public"));
         }
         Ok(_) => run(Command::new("gh")
-            .args(["release", "upload", tag, "--clobber"])
+            .args(["--repo", REPO, "release", "upload", tag, "--clobber"])
             .arg(&asset))?,
         Err(_) => run(Command::new("gh")
-            .args(["release", "create", tag, "--draft", "--prerelease"])
+            .args([
+                "--repo",
+                REPO,
+                "release",
+                "create",
+                tag,
+                "--draft",
+                "--prerelease",
+            ])
             .args(["--target", &commit, "--title", tag, "--notes-file"])
             .arg(&notes)
             .arg(&asset))?,
@@ -71,7 +91,15 @@ pub fn run_cli(root: &Path, args: &[String]) -> Res<()> {
     if digest != format!("sha256:{want}") {
         return Err(format!("{ASSET} digest {digest} != local sha256:{want}"));
     }
-    run(Command::new("gh").args(["release", "edit", tag, "--draft=false", "--prerelease"]))?;
+    run(Command::new("gh").args([
+        "--repo",
+        REPO,
+        "release",
+        "edit",
+        tag,
+        "--draft=false",
+        "--prerelease",
+    ]))?;
 
     let tagged = git(&[
         "ls-remote",

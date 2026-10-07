@@ -17,3 +17,17 @@ iw4l.community.*.tmp
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# Game data, from any install this fork reads. It is read at runtime and never
+# committed; `make publish-check` refuses these too.
+*.ff
+*.iwd
+*.iwi
+*.upk
+*.u
+*.tfc
+*.pck
+*.bnk
+*.wem
+*.xex
+*.xma

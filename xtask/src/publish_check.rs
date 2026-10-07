@@ -108,6 +108,14 @@ fn leak(rel: &str) -> Option<&'static str> {
     ) {
         return Some("original game data");
     }
+    // A piece of a Dishonored install (UE3 packages, Wwise banks) or of any
+    // other game this fork reads. Dishonored mode reads them; it never ships one.
+    if matches!(
+        ext,
+        "upk" | "u" | "umap" | "tfc" | "pck" | "bnk" | "wem" | "xex" | "xma" | "sav"
+    ) {
+        return Some("original game data");
+    }
     // A retail image, or anything else prebuilt. Nothing here is distributed as
     // a binary; the release archive is built from source by `make launcher`.
     if matches!(ext, "exe" | "dll" | "so" | "dylib" | "pdb" | "msi") {
