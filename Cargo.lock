@@ -2140,8 +2140,8 @@ dependencies = [
 
 [[package]]
 name = "cascade"
-version = "0.1.0"
-source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.1.0#5ed24f771b77c7d8e5bfc3d62ae0369538f2f9f1"
+version = "0.2.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.2.0#992dfadaf676e87f026a9c16fbc5f43dbef5d242"
 dependencies = [
  "glam",
  "upk",
@@ -2624,19 +2624,20 @@ dependencies = [
 
 [[package]]
 name = "dis_data"
-version = "0.1.0"
-source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.1.0#5ed24f771b77c7d8e5bfc3d62ae0369538f2f9f1"
+version = "0.2.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.2.0#992dfadaf676e87f026a9c16fbc5f43dbef5d242"
 dependencies = [
  "cascade",
  "edge_anim",
+ "glam",
  "upk",
  "wwise",
 ]
 
 [[package]]
 name = "dis_motion"
-version = "0.1.0"
-source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.1.0#5ed24f771b77c7d8e5bfc3d62ae0369538f2f9f1"
+version = "0.2.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.2.0#992dfadaf676e87f026a9c16fbc5f43dbef5d242"
 dependencies = [
  "dis_data",
  "glam",
@@ -2733,8 +2734,8 @@ version = "0.1.0"
 
 [[package]]
 name = "edge_anim"
-version = "0.1.0"
-source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.1.0#5ed24f771b77c7d8e5bfc3d62ae0369538f2f9f1"
+version = "0.2.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.2.0#992dfadaf676e87f026a9c16fbc5f43dbef5d242"
 dependencies = [
  "glam",
 ]
@@ -6928,8 +6929,8 @@ dependencies = [
 
 [[package]]
 name = "upk"
-version = "0.1.0"
-source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.1.0#5ed24f771b77c7d8e5bfc3d62ae0369538f2f9f1"
+version = "0.2.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.2.0#992dfadaf676e87f026a9c16fbc5f43dbef5d242"
 dependencies = [
  "lzokay-native",
 ]
@@ -7799,8 +7800,8 @@ dependencies = [
 
 [[package]]
 name = "wwise"
-version = "0.1.0"
-source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.1.0#5ed24f771b77c7d8e5bfc3d62ae0369538f2f9f1"
+version = "0.2.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.2.0#992dfadaf676e87f026a9c16fbc5f43dbef5d242"
 dependencies = [
  "lewton",
  "ww2ogg",

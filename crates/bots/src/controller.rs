@@ -142,6 +142,11 @@ impl HostController {
             .filter(|_| self.task.kind == TaskKind::Fight)
     }
 
+    /// Whether this bot has noticed `id`: it sees it now, or is fighting it.
+    pub fn noticed(&self, id: ClientId) -> bool {
+        self.focus_target() == Some(id) || self.memory.currently_seen().any(|c| c.id == id)
+    }
+
     pub fn task(&self) -> Task {
         self.task
     }

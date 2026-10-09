@@ -13,7 +13,8 @@ pub mod ui;
 
 pub use class_presets::{ClassPreset, pick_showcase, showcase_classes};
 pub use dishonored::{
-    DishonoredDraw, DishonoredMesh, DishonoredMode, DishonoredSprites, DishonoredTexture,
+    BotNotice, DishonoredDraw, DishonoredMesh, DishonoredMode, DishonoredPrompt, DishonoredSprites,
+    DishonoredTexture,
 };
 pub use pad::{ActivePad, InputDevices, PromptStyle, TestControllerRumble};
 pub use retire::Retiring;

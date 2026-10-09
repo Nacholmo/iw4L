@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use dis_data::viewmodel::{MeshPart, ParticleNotify, ViewModel};
-use dis_motion::{BlinkMode, Motion, MotionState};
+use dis_data::viewmodel::{MeshPart, ParticleNotify, SoundNotify, ViewModel};
+use dis_motion::{BlinkMode, MeleeEvent, Motion, MotionState, StepEvents};
 use edge_anim::Joint;
 use frame::{DishonoredMesh, DishonoredTexture};
 use glam::{Mat4, Quat, Vec3};
@@ -9,6 +9,14 @@ use glam::{Mat4, Quat, Vec3};
 use super::fx::{Attach, FxWorld};
 
 const SCALE: f32 = 0.01;
+/// Animations that post their own sounds (the kills and the sword swings); the motion cues voice
+/// the rest.
+const OWN_SOUNDS: [&str; 4] = [
+    "Sword_Ready_Assassination",
+    "Sword_Ready_Attack",
+    "Sword_Sneak_Attack",
+    "Sword_Ready_Fatality",
+];
 const BLEND: f32 = 0.18;
 
 #[derive(Clone, PartialEq)]
@@ -34,6 +42,15 @@ impl Layer {
         if self.current.as_ref() == Some(&t) {
             return;
         }
+        self.restart(name, looping);
+    }
+
+    /// Plays `name` from the start even if it is already playing (a new sword swing).
+    fn restart(&mut self, name: &str, looping: bool) {
+        let t = Track {
+            name: name.to_string(),
+            looping,
+        };
         if let Some(cur) = self.current.take() {
             self.previous = Some((cur, self.time));
             self.fade = BLEND;
@@ -42,22 +59,31 @@ impl Layer {
         self.time = 0.0;
     }
 
-    fn advance(&mut self, dt: f32, vm: &ViewModel) -> Vec<ParticleNotify> {
+    fn advance(&mut self, dt: f32, vm: &ViewModel) -> (Vec<ParticleNotify>, Vec<SoundNotify>) {
         let mut fired = Vec::new();
+        let mut sounds = Vec::new();
         if let Some(t) = &self.current
-            && let (Some(list), Some(a)) =
-                (vm.particle_notifies.get(&t.name), vm.anims.get(&t.name))
+            && let Some(a) = vm.anims.get(&t.name)
         {
             let (from, to) = (self.time, self.time + dt);
-            for n in list {
-                let hit = if t.looping && a.duration > 0.0 {
-                    let k = ((from - n.time) / a.duration).ceil();
-                    n.time + k * a.duration < to
+            let passed = |time: f32| {
+                if t.looping && a.duration > 0.0 {
+                    let k = ((from - time) / a.duration).ceil();
+                    time + k * a.duration < to
                 } else {
-                    n.time >= from && n.time < to && n.time <= a.duration
-                };
-                if hit {
+                    time >= from && time < to && time <= a.duration
+                }
+            };
+            for n in vm.particle_notifies.get(&t.name).into_iter().flatten() {
+                if passed(n.time) {
                     fired.push(n.clone());
+                }
+            }
+            if OWN_SOUNDS.iter().any(|p| t.name.starts_with(p)) {
+                for n in vm.sound_notifies.get(&t.name).into_iter().flatten() {
+                    if passed(n.time) {
+                        sounds.push(n.clone());
+                    }
                 }
             }
         }
@@ -69,7 +95,7 @@ impl Layer {
         if self.fade <= 0.0 {
             self.previous = None;
         }
-        fired
+        (fired, sounds)
     }
 
     fn done(&self, vm: &ViewModel) -> bool {
@@ -103,6 +129,13 @@ pub struct Hands {
     landing: f32,
     sword_socket: Mat4,
     attached_fx: Vec<(u64, usize, Mat4)>,
+    /// `camera_jnt` in the idle pose: where the view sits when no animation moves it.
+    rest_cam: Option<Mat4>,
+    /// While a kill animation moves the view: its offset from the rest pose in the view's own
+    /// axes (x right, y up, z back), translation in IW4 inches.
+    pub cam_offset: Option<(Vec3, Quat)>,
+    /// Sounds the kill and swing animations posted this frame (event, volume).
+    pub posted_sounds: Vec<(String, f32)>,
 }
 
 pub fn texture_with_mips(width: u32, height: u32, rgba: &[u8], srgb: bool) -> DishonoredTexture {
@@ -233,6 +266,15 @@ impl Hands {
                 }
             }
         }
+        let rest_cam = vm
+            .anims
+            .get("Sword_Ready_Idle")
+            .and_then(|a| a.evaluate(&vm.skeleton, 0.0, false).ok())
+            .map(|p| {
+                world_pose(bones, |i| {
+                    Mat4::from_rotation_translation(p[i].rotation, p[i].translation)
+                })[find("camera_jnt")]
+            });
         Self {
             world_bind_inv: bind.iter().map(|m| m.inverse()).collect(),
             cam_joint: find("camera_jnt"),
@@ -247,11 +289,20 @@ impl Hands {
             landing: 0.0,
             sword_socket: rotator(vm.sword_socket.unwrap_or([0, 16384, 0])) * sword_origin,
             attached_fx: Vec::new(),
+            rest_cam,
+            cam_offset: None,
+            posted_sounds: Vec::new(),
             vm,
         }
     }
 
-    pub fn update(&mut self, m: &Motion, dt: f32, fx: &mut FxWorld) -> Vec<DishonoredMesh> {
+    pub fn update(
+        &mut self,
+        m: &Motion,
+        events: &StepEvents,
+        dt: f32,
+        fx: &mut FxWorld,
+    ) -> Vec<DishonoredMesh> {
         let speed = m.speed_2d();
         let moving = speed > 40.0;
         if m.state == MotionState::Walking
@@ -283,6 +334,13 @@ impl Hands {
             ),
             MotionState::Falling | MotionState::Ladder => ("Sword_Ready_Jump", false),
             MotionState::Blinking => ("Sword_Ready_Idle", true),
+            MotionState::Takedown => (
+                m.takedown
+                    .run
+                    .as_ref()
+                    .map_or("Sword_Ready_Idle", |r| r.anim.as_str()),
+                false,
+            ),
             MotionState::Walking if self.landing > 0.0 => ("Sword_Ready_JumpLandSmall", false),
             MotionState::Walking => match (m.crouched, moving, m.sprinting, speed < 250.0) {
                 (true, false, _, _) => ("Sword_Sneak_Idle", true),
@@ -293,7 +351,23 @@ impl Hands {
                 (false, true, false, false) => ("Sword_Ready_Run", true),
             },
         };
-        self.base.play(base, looping);
+        // A swing (or its recoil) plays over the base pose, from the start on every new one.
+        match &m.melee.run {
+            Some(run) if m.state != MotionState::Takedown => {
+                let fresh = events.melee.iter().any(|e| {
+                    matches!(
+                        e,
+                        MeleeEvent::Swing { .. } | MeleeEvent::EnvHit { anim: Some(_), .. }
+                    )
+                });
+                if fresh {
+                    self.base.restart(&run.anim.name, false);
+                } else {
+                    self.base.play(&run.anim.name, false);
+                }
+            }
+            _ => self.base.play(base, looping),
+        }
 
         let blink = m.blink.mode;
         let left_name = match blink {
@@ -331,15 +405,21 @@ impl Hands {
         }
         self.prev_blink = blink;
         self.prev_state = m.state;
-        let mut fired = self.base.advance(dt, &self.vm);
-        fired.extend(self.left.advance(dt, &self.vm));
+        let (mut fired, sounds) = self.base.advance(dt, &self.vm);
+        fired.extend(self.left.advance(dt, &self.vm).0);
+        self.posted_sounds
+            .extend(sounds.into_iter().map(|n| (n.event, n.volume)));
 
         let Some(mut pose) = layer_pose(&self.vm, &self.base) else {
+            self.cam_offset = None;
             return Vec::new();
         };
         let left_on = !matches!(
             m.state,
-            MotionState::Mantling | MotionState::Sliding | MotionState::Swimming
+            MotionState::Mantling
+                | MotionState::Sliding
+                | MotionState::Swimming
+                | MotionState::Takedown
         );
         if left_on {
             if let Some(lp) = layer_pose(&self.vm, &self.left) {
@@ -359,6 +439,18 @@ impl Hands {
             glam::Vec4::W,
         );
         let view = to_view * world[self.cam_joint].inverse();
+        // The kill animations move the view itself (the arms are posed around it).
+        self.cam_offset = match (m.state, self.rest_cam) {
+            (MotionState::Takedown, Some(rest)) => {
+                let d = rest.inverse() * world[self.cam_joint];
+                // camera_jnt axes (+X up, +Y right, +Z back) -> view axes (x right, y up, z back).
+                let axes =
+                    Mat4::from_cols(glam::Vec4::Y, glam::Vec4::X, glam::Vec4::Z, glam::Vec4::W);
+                let (_, rot, pos) = (axes * d * axes).to_scale_rotation_translation();
+                Some((pos / super::world::CM_PER_INCH, rot))
+            }
+            _ => None,
+        };
 
         let cam_to_fx = Mat4::from_cols(glam::Vec4::Z, glam::Vec4::X, glam::Vec4::Y, glam::Vec4::W)
             * world[self.cam_joint].inverse();

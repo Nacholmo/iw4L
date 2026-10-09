@@ -1,5 +1,6 @@
 pub mod fx;
 pub mod hands;
+mod pawns;
 mod sound;
 pub mod world;
 
@@ -9,16 +10,23 @@ use std::sync::{Mutex, mpsc};
 use bevy::input::gamepad::{Gamepad, GamepadButton};
 use bevy::prelude::*;
 use dis_data::effects::Fx;
-use dis_motion::{BlinkEvent, BlinkMode, Motion, MotionState, MotionTuning, StepEvents};
-use frame::{AppScreen, DishonoredDraw, DishonoredMode};
+use dis_motion::{
+    BlinkEvent, BlinkMode, MeleeEvent, Motion, MotionState, MotionTuning, Reach, StepEvents,
+};
+use frame::{AppScreen, DishonoredDraw, DishonoredMode, DishonoredPrompt};
 use glam::Affine3A;
 
 use fx::{Attach, FxWorld};
 use hands::Hands;
+use pawns::{Character, Pawns, actor_of, client_of};
 use world::{LadderCache, MapWorld, angles_from_iw, angles_to_iw, from_iw, surface_below, to_iw};
+
+/// How long the view takes to settle onto a kill animation's camera.
+const TAKEDOWN_EASE: f32 = 0.3;
 
 struct Loaded {
     tuning: MotionTuning,
+    npc_health: f32,
     sounds: sound::SoundBank,
     viewmodel: Option<dis_data::viewmodel::ViewModel>,
     effects: dis_data::effects::Effects,
@@ -48,6 +56,9 @@ struct Dishonored {
     ladders: LadderCache,
     blink_level: usize,
     time: f32,
+    npc_health: f32,
+    /// The view when a kill animation took it over, eased from.
+    ease_from: Option<Transform>,
 }
 
 pub fn register(app: &mut App) {
@@ -100,9 +111,7 @@ fn load() -> Result<Loaded, String> {
     let data = dis_data::load(&install, difficulty)
         .map_err(|e| format!("cannot read {}: {e}", install.display()))?;
     let mut warnings = data.warnings.clone();
-    let sounds = dis_data::sounds::load_sounds(&install, &data.blink.sound_events);
-    warnings.extend(sounds.warnings.iter().cloned());
-    let sounds = sound::decode(sounds, &mut warnings);
+    let mut sounds = dis_data::sounds::load_sounds(&install, &data.blink.sound_events);
     let viewmodel = match dis_data::viewmodel::load_viewmodel(&install) {
         Ok(vm) => {
             warnings.extend(vm.warnings.iter().cloned());
@@ -113,6 +122,11 @@ fn load() -> Result<Loaded, String> {
             None
         }
     };
+    if let Some(vm) = &viewmodel {
+        sounds.add_events(&install, posted_events(&data, vm));
+    }
+    warnings.extend(sounds.warnings.iter().cloned());
+    let sounds = sound::decode(sounds, &mut warnings);
     let effects = dis_data::effects::load_effects(&install);
     warnings.extend(effects.warnings.iter().cloned());
     for w in &warnings {
@@ -126,11 +140,43 @@ fn load() -> Result<Loaded, String> {
     );
     Ok(Loaded {
         tuning: MotionTuning::from_game(&data),
+        npc_health: data.melee.default_npc_health,
         sounds,
         viewmodel,
         effects,
         source: format!("{} ({difficulty:?})", install.display()),
     })
+}
+
+/// The sounds the kill and sword animations post.
+fn posted_events(
+    data: &dis_data::GameData,
+    vm: &dis_data::viewmodel::ViewModel,
+) -> std::collections::BTreeSet<String> {
+    let a = &data.assassinate;
+    let played: std::collections::HashSet<&str> = data
+        .drop_assassinate
+        .sides
+        .iter()
+        .chain(&a.slow)
+        .chain(&a.fast)
+        .chain([&a.generic])
+        .map(|s| s.anim.as_str())
+        .chain(
+            data.melee
+                .swings
+                .iter()
+                .flatten()
+                .flat_map(|s| [Some(&s.swing), s.env_hit.as_ref(), s.env_hit_chain.as_ref()])
+                .flatten()
+                .map(|a| a.name.as_str()),
+        )
+        .collect();
+    vm.sound_notifies
+        .iter()
+        .filter(|(clip, _)| played.contains(clip.as_str()))
+        .flat_map(|(_, list)| list.iter().map(|n| n.event.clone()))
+        .collect()
 }
 
 fn read_input(
@@ -169,6 +215,7 @@ fn read_input(
         lean: (axis(keys.pressed(KeyCode::KeyE), keys.pressed(KeyCode::KeyQ)) + bumpers)
             .clamp(-1.0, 1.0),
         blink: kb.speed.active || mouse.pressed(MouseButton::Right) || keys.pressed(KeyCode::KeyF),
+        attack: kb.attack.active,
     }
 }
 
@@ -184,6 +231,7 @@ fn stop(
             .set_external_motion(sim::ClientId(mode.client), false);
     }
     dis.motion = None;
+    dis.ease_from = None;
     dis.sfx.silence();
     dis.fx_state = FxState::default();
     if let Some(fx) = dis.fx.as_mut() {
@@ -191,6 +239,7 @@ fn stop(
     }
     mode.active = false;
     mode.camera = None;
+    mode.prompt = None;
     mode.status = "off".into();
     draw.active = false;
     draw.meshes.clear();
@@ -206,9 +255,10 @@ fn update(
     local: Res<net::LocalPresentClient>,
     presented: Res<net::PresentedSnapshot>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
-    (runtime, actions): (
+    (runtime, actions, bot_notice): (
         Option<Res<audio::AudioRuntime>>,
         Res<net::ClientActionInput>,
+        Option<Res<frame::BotNotice>>,
     ),
     mut mode: ResMut<DishonoredMode>,
     mut draw: ResMut<DishonoredDraw>,
@@ -230,6 +280,7 @@ fn update(
         match result {
             Ok(loaded) => {
                 dis.tuning = Some(loaded.tuning);
+                dis.npc_health = loaded.npc_health;
                 dis.sounds = Some(loaded.sounds);
                 dis.hands = loaded.viewmodel.map(Hands::new);
                 dis.fx = Some(FxWorld::new(loaded.effects));
@@ -313,19 +364,45 @@ fn update(
             motion.blink.level = dis.blink_level;
         }
     }
-    // Blink travel steers the view itself until it lands.
-    if motion.state != MotionState::Blinking {
+    // Blink travel and kills steer the view themselves until they end.
+    if !matches!(motion.state, MotionState::Blinking | MotionState::Takedown) {
         let (yaw, pitch) = angles_from_iw(ps.viewangles[1], ps.viewangles[0]);
         motion.yaw = yaw;
         motion.pitch = pitch;
     }
 
+    let characters = characters(&authority.0, local.0);
+    let noticed = |client: u32| {
+        bot_notice
+            .as_ref()
+            .and_then(|n| n.0.get(&client))
+            .map(|bits| local.0.0 < 64 && bits & (1 << local.0.0) != 0)
+    };
+    let corvo_eye = to_iw(motion.camera.eye);
+    let npc_health = dis.npc_health;
     let before = motion.pos;
+    let view_before = (motion.yaw, motion.pitch);
     let ladders = RefCell::new(std::mem::take(&mut dis.ladders));
     let (events, surface, water_z) = authority.0.with_player_clip(local.0, |trace| {
+        let pawns: Pawns = characters
+            .iter()
+            .map(|c| {
+                let bot = noticed(c.client);
+                let c = Character {
+                    bot: bot.is_some(),
+                    ..*c
+                };
+                let awareness = pawns::awareness(trace, &c, bot.unwrap_or(false), corvo_eye);
+                (
+                    actor_of(c.client),
+                    pawns::pawn_info(&c, awareness, npc_health),
+                )
+            })
+            .collect();
         let map = MapWorld {
             trace,
             ladders: &ladders,
+            pawns: &pawns,
         };
         let events = motion.update(&map, &input, dt);
         let surface = surface_below(trace, motion.feet());
@@ -342,7 +419,16 @@ fn update(
     let feet = to_iw(motion.feet());
     authority.0.set_origin(local.0, feet.to_array());
     let (iw_yaw, iw_pitch) = angles_to_iw(motion.yaw, motion.pitch);
+    if events.drop_assassination.is_some() || events.assassination.is_some() {
+        // The kill turned Corvo: carry the player's look over to where he now faces.
+        let (yaw0, pitch0) = angles_to_iw(view_before.0, view_before.1);
+        let turn = |a: f32, b: f32| (a - b + 540.0).rem_euclid(360.0) - 180.0;
+        authority
+            .0
+            .turn_view(local.0, [turn(iw_pitch, pitch0), turn(iw_yaw, yaw0), 0.0]);
+    }
     authority.0.set_viewangles(local.0, [iw_pitch, iw_yaw, 0.0]);
+    strike(&mut authority.0, local.0, &characters, &events, npc_health);
     for b in &events.blink {
         match b {
             BlinkEvent::Released => diag::debug!(World, "Dishonored: blink"),
@@ -379,7 +465,12 @@ fn update(
             dt,
         );
         if let Some(hands) = dis.hands.as_mut() {
-            meshes = hands.update(motion, dt, fxw);
+            meshes = hands.update(motion, &events, dt, fxw);
+            for (event, volume) in hands.posted_sounds.drain(..) {
+                if let Some(bank) = dis.sounds.as_ref() {
+                    dis.sfx.post(bank, runtime.as_deref(), &event, volume);
+                }
+            }
         }
         sprites = fxw.update(dt);
     }
@@ -393,13 +484,29 @@ fn update(
         angles[1] += (k * 0.6 * (t * 1.3).cos()).to_degrees();
     }
     let fov = motion.camera.fov_deg;
-    mode.camera = Some((
-        render_scene::transform_from_iw_view(render_scene::WorldCameraPose {
-            origin: eye.to_array(),
-            angles,
-        }),
-        fov,
-    ));
+    let mut camera = render_scene::transform_from_iw_view(render_scene::WorldCameraPose {
+        origin: eye.to_array(),
+        angles,
+    });
+    let offset = dis.hands.as_ref().and_then(|h| h.cam_offset);
+    match (motion.takedown.run.as_ref(), offset) {
+        (Some(run), Some((translation, rotation))) => {
+            let from = *dis
+                .ease_from
+                .get_or_insert(mode.camera.map_or(camera, |(c, _)| c));
+            let anim = camera.mul_transform(Transform {
+                translation,
+                rotation,
+                ..default()
+            });
+            let k = (run.t / TAKEDOWN_EASE).clamp(0.0, 1.0);
+            let w = k * k * (3.0 - 2.0 * k);
+            camera.translation = from.translation.lerp(anim.translation, w);
+            camera.rotation = from.rotation.slerp(anim.rotation, w);
+        }
+        _ => dis.ease_from = None,
+    }
+    mode.camera = Some((camera, fov));
     mode.view_angles = angles;
 
     let blink = motion.blink.fx;
@@ -421,6 +528,14 @@ fn update(
         MotionState::Swimming => "Swimming",
         MotionState::Ladder => "Ladder",
         MotionState::Blinking => "Blinking",
+        MotionState::Takedown => "Takedown",
+    };
+    mode.prompt = match (motion.takedown.prompt, motion.takedown.assassinate) {
+        _ if motion.takedown.diving.is_some() => None,
+        (Some((_, Reach::InRange)), _) => Some(DishonoredPrompt::DropAssassinate),
+        (Some((_, Reach::Track)), _) => Some(DishonoredPrompt::DropDive),
+        (None, Some(_)) => Some(DishonoredPrompt::Assassinate),
+        (None, None) => None,
     };
     let level = &tuning.blink.levels[motion.blink.level.min(tuning.blink.levels.len() - 1)];
     mode.status = format!(
@@ -535,6 +650,103 @@ fn fx_triggers(
     } else if st.prev_state == Some(MotionState::Swimming) {
         fxw.spawn(Fx::CameraWater, Affine3A::IDENTITY, Attach::Camera);
     }
+    // The blade striking the world shakes the view, scaled from the game's shake strength.
+    if let Some(MeleeEvent::EnvHit { shake, .. }) = ev
+        .melee
+        .iter()
+        .find(|e| matches!(e, MeleeEvent::EnvHit { .. }))
+    {
+        st.shake = (0.25, shake / 400.0);
+    }
     st.prev_state = Some(m.state);
     st.shake.0 = (st.shake.0 - dt).max(0.0);
+}
+
+/// The other living players, as the sword and the kills see them.
+fn characters(world: &sim::SimWorld, local: sim::ClientId) -> Vec<Character> {
+    use playerstate_iw4::{PM_TYPE_LAST_STAND, PM_TYPE_NORMAL_LINKED, pm_flags};
+    let mut out = Vec::new();
+    world.visit_players(|id, ps| {
+        let alive = matches!(ps.pm_type, 0 | PM_TYPE_NORMAL_LINKED | PM_TYPE_LAST_STAND);
+        if id != local && alive && ps.health > 0 {
+            out.push(Character {
+                client: id.0,
+                bot: false,
+                origin: ps.origin,
+                eye_height: ps.view_height_current,
+                angles: ps.viewangles,
+                health: ps.health,
+                max_health: ps.max_health,
+                sprinting: ps.pm_flags & pm_flags::SPRINTING != 0,
+            });
+        }
+    });
+    out
+}
+
+/// Lands this frame's sword hits and kills on the match: the host's sim applies them as melee
+/// damage from the local player on its next tick, placing a paired kill's victim first.
+fn strike(
+    world: &mut sim::SimWorld,
+    local: sim::ClientId,
+    characters: &[Character],
+    ev: &StepEvents,
+    npc_health: f32,
+) {
+    let mut queue = |actor: u32, blow: sim::Blow, place: Option<([f32; 3], f32)>| {
+        let Some(target) = client_of(actor) else {
+            return;
+        };
+        if !characters.iter().any(|c| c.client == target) {
+            return;
+        }
+        world.strike(sim::ExternalStrike {
+            attacker: local,
+            target: sim::ClientId(target),
+            blow,
+            place,
+        });
+    };
+    for e in &ev.melee {
+        let MeleeEvent::Hit {
+            target,
+            damage,
+            killing,
+        } = e
+        else {
+            continue;
+        };
+        let max = client_of(*target)
+            .and_then(|t| characters.iter().find(|c| c.client == t))
+            .map_or(100, |c| c.max_health);
+        let blow = if *killing {
+            sim::Blow::Kill
+        } else {
+            sim::Blow::Damage(pawns::mw2_damage(*damage, max, npc_health))
+        };
+        diag::debug!(World, "Dishonored: sword hit actor {target} ({blow:?})");
+        queue(*target, blow, None);
+    }
+    if let Some((target, side)) = ev.drop_assassination {
+        diag::info!(
+            World,
+            "Dishonored: drop assassination of actor {target} from the {side:?}"
+        );
+        queue(target, sim::Blow::Kill, None);
+    }
+    if let Some(a) = ev.assassination {
+        let place = (!a.generic).then(|| {
+            let (yaw, _) = angles_to_iw(a.victim_yaw, 0.0);
+            (to_iw(a.victim_feet).to_array(), yaw)
+        });
+        diag::info!(
+            World,
+            "Dishonored: assassination of actor {} from the {:?} (fast={} generic={})",
+            a.target,
+            a.side,
+            a.fast,
+            a.generic
+        );
+        queue(a.target, sim::Blow::Kill, place);
+    }
 }

@@ -209,6 +209,8 @@ pub struct SimState {
 
     pub(crate) external_motion: std::collections::HashSet<ClientId>,
 
+    pub(crate) external_strikes: Vec<crate::ExternalStrike>,
+
     last_pmove_walking: HashMap<ClientId, i32>,
 
     stuck_holdrand: u32,
@@ -290,6 +292,7 @@ impl Default for SimState {
             presentation: PresentationQueue::default(),
             pending_final_kill: None,
             external_motion: Default::default(),
+            external_strikes: Vec::new(),
             last_pmove_walking: HashMap::new(),
             stuck_holdrand: 0,
             last_stuck_ejects: Vec::new(),

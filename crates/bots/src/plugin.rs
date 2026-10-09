@@ -107,6 +107,7 @@ impl Plugin for BotsPlugin {
             .init_resource::<BotNav>()
             .init_resource::<BotNavigationReady>()
             .init_resource::<BotMeter>()
+            .init_resource::<frame::BotNotice>()
             .add_systems(
                 Update,
                 (
@@ -453,6 +454,7 @@ struct ThinkBots<'w> {
     fire: ResMut<'w, BotFireQueue>,
     reliable: ResMut<'w, ReliableEventHub>,
     meter: ResMut<'w, BotMeter>,
+    notice: ResMut<'w, frame::BotNotice>,
 }
 
 fn think_bots(mut p: ThinkBots) {
@@ -463,6 +465,7 @@ fn think_bots(mut p: ThinkBots) {
     for bot in &p.roster.bots {
         p.reliable.ack_all(bot.id);
     }
+    p.notice.0.clear();
     if p.roster.bots.is_empty() {
         p.fire.drain();
         return;
@@ -532,6 +535,12 @@ fn think_bots(mut p: ThinkBots) {
                 AUTHORITY_MS,
             );
             controller_us += started.elapsed().as_micros() as u64;
+            let noticed = snapshot
+                .players
+                .iter()
+                .filter(|(id, _)| id.0 < 64 && brain.noticed(*id))
+                .fold(0u64, |bits, (id, _)| bits | 1 << id.0);
+            p.notice.0.insert(bot.id.0, noticed);
             cmd.server_time = p.clock.time_ms;
             cmd
         } else {

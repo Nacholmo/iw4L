@@ -11,6 +11,8 @@ mod corpse;
 mod damage;
 mod entity_run;
 mod equipment;
+mod external_strike;
+pub use external_strike::{Blow, ExternalStrike};
 mod frame;
 mod gentity;
 pub mod hudelem;

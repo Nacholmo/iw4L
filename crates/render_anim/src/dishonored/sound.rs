@@ -10,6 +10,7 @@ const MIX_GAIN: f32 = 1.6;
 
 pub struct SoundBank {
     cues: HashMap<Cue, PlayNode>,
+    events: HashMap<String, PlayNode>,
     clips: HashMap<u32, ExternalClip>,
 }
 
@@ -25,6 +26,7 @@ pub fn decode(sounds: Sounds, warnings: &mut Vec<String>) -> SoundBank {
     }
     SoundBank {
         cues: sounds.cues,
+        events: sounds.events,
         clips,
     }
 }
@@ -91,16 +93,37 @@ impl Sfx {
         (self.rng % n.max(1) as u64) as usize
     }
 
-    fn play(&mut self, f: &Frame, cue: Cue, volume: f32) -> Vec<ExternalSound> {
-        let (Some(runtime), Some(node)) = (f.runtime, f.bank.cues.get(&cue)) else {
+    fn play_node(
+        &mut self,
+        bank: &SoundBank,
+        runtime: Option<&AudioRuntime>,
+        node: Option<&PlayNode>,
+        volume: f32,
+    ) -> Vec<ExternalSound> {
+        let (Some(runtime), Some(node)) = (runtime, node) else {
             return Vec::new();
         };
         let mut ids = node.choose(&mut |n| self.rand(n));
         ids.dedup();
         ids.into_iter()
-            .filter_map(|id| f.bank.clips.get(&id))
+            .filter_map(|id| bank.clips.get(&id))
             .map(|clip| runtime.play_external(clip, volume * MIX_GAIN))
             .collect()
+    }
+
+    fn play(&mut self, f: &Frame, cue: Cue, volume: f32) -> Vec<ExternalSound> {
+        self.play_node(f.bank, f.runtime, f.bank.cues.get(&cue), volume)
+    }
+
+    /// Plays a sound an animation posted, by its event name.
+    pub fn post(
+        &mut self,
+        bank: &SoundBank,
+        runtime: Option<&AudioRuntime>,
+        event: &str,
+        volume: f32,
+    ) {
+        self.play_node(bank, runtime, bank.events.get(event), volume);
     }
 
     pub fn silence(&mut self) {

@@ -12,7 +12,23 @@ pub struct DishonoredMode {
     pub camera: Option<(Transform, f32)>,
     pub view_angles: [f32; 3],
     pub status: String,
+    /// What the attack button would do now, for the HUD.
+    pub prompt: Option<DishonoredPrompt>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DishonoredPrompt {
+    Assassinate,
+    /// A drop assassination, in reach.
+    DropAssassinate,
+    /// A drop assassination still too far below: attacking locks on and dives.
+    DropDive,
+}
+
+/// Which clients each living bot has noticed, by bot client id: a bit per client id. The bots
+/// write it every authority tick; Dishonored mode reads it as their awareness.
+#[derive(Resource, Default)]
+pub struct BotNotice(pub std::collections::HashMap<u32, u64>);
 
 pub struct DishonoredTexture {
     pub width: u32,

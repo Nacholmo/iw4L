@@ -37,6 +37,7 @@ pub struct LadderCache(HashMap<[i32; 4], (f32, f32)>);
 pub struct MapWorld<'a> {
     pub trace: &'a dyn Fn(GroundTraceInput) -> Trace,
     pub ladders: &'a RefCell<LadderCache>,
+    pub pawns: &'a super::pawns::Pawns,
 }
 
 impl MapWorld<'_> {
@@ -102,7 +103,11 @@ impl dis_motion::World for MapWorld<'_> {
             location: start + (end - start) * time,
             normal: dis_motion::Vec3::new(n.x, -n.y, n.z),
             start_penetrating,
-            actor: if entity { u32::from(t.hit_id) + 1 } else { 0 },
+            actor: if entity {
+                super::pawns::actor_of(u32::from(t.hit_id))
+            } else {
+                0
+            },
             is_pawn: entity && t.hit_id < MAX_CLIENTS,
         })
     }
@@ -123,6 +128,10 @@ impl dis_motion::World for MapWorld<'_> {
         Some(Water {
             surface_z: surface * CM_PER_INCH,
         })
+    }
+
+    fn pawn(&self, actor: u32) -> Option<dis_motion::PawnInfo> {
+        self.pawns.get(&actor).copied()
     }
 
     fn ladder(&self, center: dis_motion::Vec3, half: dis_motion::Vec3) -> Option<Ladder> {

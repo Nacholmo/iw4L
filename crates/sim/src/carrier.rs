@@ -307,6 +307,11 @@ impl SimWorld {
         }
     }
 
+    /// Queues a blow from a player under external motion; the next tick lands it.
+    pub fn strike(&mut self, strike: crate::ExternalStrike) {
+        self.frame().external_strikes.push(strike);
+    }
+
     pub fn with_player_clip<R>(
         &mut self,
         id: ClientId,
@@ -321,6 +326,20 @@ impl SimWorld {
 
     pub fn set_viewangles(&mut self, id: ClientId, viewangles: [f32; 3]) -> bool {
         self.frame().set_viewangles(id, viewangles)
+    }
+
+    /// Turns a player's view by `by` (degrees) and moves the command-angle base with it, so the
+    /// client's look carries on from the new direction.
+    pub fn turn_view(&mut self, id: ClientId, by: [f32; 3]) -> bool {
+        let mut frame = self.frame();
+        let Some(ps) = frame.player_mut(id) else {
+            return false;
+        };
+        for (axis, by) in by.into_iter().enumerate() {
+            ps.viewangles[axis] += by;
+            ps.delta_angles[axis] += by;
+        }
+        true
     }
 
     pub fn set_e_flags(&mut self, id: ClientId, e_flags: u32) -> bool {

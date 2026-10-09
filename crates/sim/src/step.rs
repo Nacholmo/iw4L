@@ -47,6 +47,7 @@ pub(crate) fn schedule() -> Schedule {
             (
                 apply_script_signals_system,
                 apply_actions_system,
+                apply_external_strikes_system,
                 crate::script::sync_players,
                 crate::script::sync_presence,
                 run_players_system,
@@ -261,6 +262,14 @@ fn apply_actions_system(world: &mut World) {
     let results = apply_actions(&mut frame, tick, &actions);
     drop(frame);
     world.resource_mut::<StepRequest>().action_results = results;
+}
+
+fn apply_external_strikes_system(world: &mut World) {
+    let tick = world.resource::<StepRequest>().tick;
+    let mut frame = frame_world(world);
+    for strike in std::mem::take(&mut frame.external_strikes) {
+        crate::external_strike::apply(&mut frame, tick, &strike);
+    }
 }
 
 fn run_players_system(ecs: &mut World) {
