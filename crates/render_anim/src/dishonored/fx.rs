@@ -59,8 +59,8 @@ impl FxWorld {
             transform
         };
         let distance = match attach {
-            Attach::Viewmodel => t.translation.length(),
-            _ => (t.translation - self.camera.translation).length(),
+            Attach::Viewmodel | Attach::Camera => t.translation.length(),
+            Attach::World => (t.translation - self.camera.translation).length(),
         };
         self.live.push(Live {
             id,
@@ -95,12 +95,16 @@ impl FxWorld {
         self.live.clear();
     }
 
+    /// A system loaded by path (contact and lens effects).
+    pub fn by_path(&self, path: &str) -> Option<Arc<SystemDef>> {
+        self.effects.by_path.get(path).cloned()
+    }
+
+    /// Lens effects are simulated in the camera's own space (X forward, Y right, Z up), the lens
+    /// distance ahead, and drawn in view space, so they stay on the lens however the view moves
+    /// (kill animations included).
     fn lens_transform(&self) -> Affine3A {
-        let fwd = self.camera.matrix3.x_axis;
-        Affine3A {
-            matrix3: self.camera.matrix3,
-            translation: self.camera.translation + fwd * self.effects.lens_distance,
-        }
+        Affine3A::from_translation(UVec3::X * self.effects.lens_distance)
     }
 
     fn texture(&mut self, material: &cascade::SpriteMaterial) -> Arc<DishonoredTexture> {
@@ -121,16 +125,16 @@ impl FxWorld {
         let lens = self.lens_transform();
         let eye = self.camera.translation;
         for l in &mut self.live {
-            if l.attach == Attach::Camera {
-                l.inst.transform = lens;
-            }
-            let from = if l.attach == Attach::Viewmodel {
-                glam::Vec3A::ZERO
-            } else {
-                eye
+            // Distance-based LOD, as the engine does; lens effects are a lens distance away.
+            let distance = match l.attach {
+                Attach::Camera => {
+                    l.inst.transform = lens;
+                    lens.translation.length()
+                }
+                Attach::Viewmodel => l.inst.transform.translation.length(),
+                Attach::World => (l.inst.transform.translation - eye).length(),
             };
-            l.inst
-                .set_camera_distance((l.inst.transform.translation - from).length());
+            l.inst.set_camera_distance(distance);
             l.inst.update(dt);
         }
         self.live.retain(|l| !l.inst.is_finished());
@@ -141,15 +145,14 @@ impl FxWorld {
             UVec3::from(basis.y_axis),
             UVec3::from(basis.z_axis),
         );
-        let cam_eye = UVec3::from(eye);
         let mut batches: HashMap<(bool, String), DishonoredSprites> = HashMap::new();
         let mut materials = Vec::new();
         for li in 0..self.live.len() {
             let attach = self.live[li].attach;
-            let (right, up, fwd) = if attach == Attach::Viewmodel {
-                (UVec3::X, UVec3::Z, UVec3::NEG_Y)
-            } else {
-                (cam_right, cam_up, cam_fwd)
+            let (right, up, fwd) = match attach {
+                Attach::Viewmodel => (UVec3::X, UVec3::Z, UVec3::NEG_Y),
+                Attach::Camera => (UVec3::Y, UVec3::Z, UVec3::X),
+                Attach::World => (cam_right, cam_up, cam_fwd),
             };
             let l = &self.live[li];
             let defs = l.inst.emitter_defs();
@@ -191,14 +194,7 @@ impl FxWorld {
                 let place = |q: UVec3| -> [f32; 3] {
                     match attach {
                         Attach::World => to_iw(q).to_array(),
-                        Attach::Camera => {
-                            let d = q - cam_eye;
-                            [
-                                d.dot(cam_right) * VIEW_SCALE,
-                                d.dot(cam_up) * VIEW_SCALE,
-                                -d.dot(cam_fwd) * VIEW_SCALE,
-                            ]
-                        }
+                        Attach::Camera => [q.y * VIEW_SCALE, q.z * VIEW_SCALE, -q.x * VIEW_SCALE],
                         Attach::Viewmodel => [q.x * VIEW_SCALE, q.z * VIEW_SCALE, q.y * VIEW_SCALE],
                     }
                 };
@@ -237,26 +233,58 @@ impl FxWorld {
                     vertices: Vec::new(),
                     indices: Vec::new(),
                 });
-                let base = batch.vertices.len() as u32;
-                for (corner, uv) in [
-                    (-a - b, [0.0, 1.0]),
-                    (a - b, [1.0, 1.0]),
-                    (a + b, [1.0, 0.0]),
-                    (-a + b, [0.0, 0.0]),
-                ] {
-                    let [x, y, z] = place(p.pos + corner);
-                    batch
-                        .vertices
-                        .push([x, y, z, uv[0], uv[1], col[0], col[1], col[2], col[3]]);
+                // A flipbook shows one cell of its texture grid, cross-fading to the next when
+                // blending.
+                let cells: Vec<([f32; 4], f32)> = match (p.sub_image, &e.sub_uv) {
+                    (Some((i, j, f)), Some(s)) => {
+                        // Inset half a texel so filtering doesn't bleed the neighbouring cells.
+                        let (hx, hy) = (
+                            0.5 / mat.width.max(1) as f32,
+                            0.5 / mat.height.max(1) as f32,
+                        );
+                        let cell = |k: u32| {
+                            let (cw, ch) = (1.0 / s.cols.max(1) as f32, 1.0 / s.rows.max(1) as f32);
+                            let cols = s.cols.max(1);
+                            let (u, v) = ((k % cols) as f32 * cw, (k / cols) as f32 * ch);
+                            [u + hx, v + hy, cw - 2.0 * hx, ch - 2.0 * hy]
+                        };
+                        if f > 0.0 {
+                            vec![(cell(i), 1.0 - f), (cell(j), f)]
+                        } else {
+                            vec![(cell(i), 1.0)]
+                        }
+                    }
+                    _ => vec![([0.0, 0.0, 1.0, 1.0], 1.0)],
+                };
+                for (cell, w) in cells {
+                    // Additive sprites fade by colour, translucent ones by opacity.
+                    let col = if additive {
+                        [col[0] * w, col[1] * w, col[2] * w, col[3]]
+                    } else {
+                        [col[0], col[1], col[2], col[3] * w]
+                    };
+                    let base = batch.vertices.len() as u32;
+                    for (corner, uv) in [
+                        (-a - b, [0.0, 1.0]),
+                        (a - b, [1.0, 1.0]),
+                        (a + b, [1.0, 0.0]),
+                        (-a + b, [0.0, 0.0]),
+                    ] {
+                        let [x, y, z] = place(p.pos + corner);
+                        let (u, v) = (cell[0] + uv[0] * cell[2], cell[1] + uv[1] * cell[3]);
+                        batch
+                            .vertices
+                            .push([x, y, z, u, v, col[0], col[1], col[2], col[3]]);
+                    }
+                    batch.indices.extend_from_slice(&[
+                        base,
+                        base + 1,
+                        base + 2,
+                        base,
+                        base + 2,
+                        base + 3,
+                    ]);
                 }
-                batch.indices.extend_from_slice(&[
-                    base,
-                    base + 1,
-                    base + 2,
-                    base,
-                    base + 2,
-                    base + 3,
-                ]);
             }
         }
         for (key, mat) in materials {
@@ -286,4 +314,53 @@ pub fn camera_basis(eye: UVec3, forward: UVec3) -> Affine3A {
     let r = UVec3::Z.cross(f).normalize_or(UVec3::Y);
     let u = f.cross(r);
     Affine3A::from_mat3_translation(Mat3::from_cols(f, r, u), eye)
+}
+
+/// Points a contact effect's axes as the contact table says: along the hit normal, the line
+/// from the camera to the hit, or the swing.
+pub fn contact_transform(
+    orient: &[Option<String>; 3],
+    point: UVec3,
+    normal: UVec3,
+    line: UVec3,
+    swing: UVec3,
+) -> Affine3A {
+    let dir = |mode: &Option<String>| -> Option<UVec3> {
+        let v = match mode.as_deref()? {
+            "DCO_HIT_NORMAL" => normal,
+            "DCO_LINE_BETWEEN_ACTORS" => line,
+            "DCO_VELOCITY_DIRECTION" => swing,
+            "DCO_VELOCITY_DIRECTION_2D" => swing.with_z(0.0),
+            _ => return None,
+        };
+        v.try_normalize()
+    };
+    let mut axes = [dir(&orient[0]), dir(&orient[1]), dir(&orient[2])];
+    // Keep the first axis given; make the others perpendicular to it.
+    if let Some(first) = axes.iter().flatten().next().copied() {
+        for a in axes.iter_mut().flatten() {
+            if *a != first {
+                *a = (*a - first * a.dot(first)).try_normalize().unwrap_or(*a);
+            }
+        }
+    }
+    let (x, y, z) = match axes {
+        [Some(x), Some(y), _] => (x, y, x.cross(y)),
+        [Some(x), None, Some(z)] => (x, z.cross(x), z),
+        [None, Some(y), Some(z)] => (y.cross(z), y, z),
+        [Some(x), None, None] => {
+            let y = UVec3::Z.cross(x).try_normalize().unwrap_or(UVec3::Y);
+            (x, y, x.cross(y))
+        }
+        [None, Some(y), None] => {
+            let x = y.cross(UVec3::Z).try_normalize().unwrap_or(UVec3::X);
+            (x, y, x.cross(y))
+        }
+        [None, None, Some(z)] => {
+            let x = UVec3::Y.cross(z).try_normalize().unwrap_or(UVec3::X);
+            (x, z.cross(x), z)
+        }
+        [None, None, None] => (UVec3::X, UVec3::Y, UVec3::Z),
+    };
+    Affine3A::from_mat3_translation(Mat3::from_cols(x, y, z), point)
 }

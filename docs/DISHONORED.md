@@ -17,6 +17,7 @@ pinned by tag in `Cargo.toml`; its tests run there, against your install.
 | sword, assassinate, drop assassination | fire (left mouse) | fire trigger |
 | Blink tier I / II | 1 / 2 | D-pad down / up |
 | lean | Q / E | bumpers |
+| lean forward | Q and E together | both bumpers |
 | slow walk | Alt | |
 
 The install is found through `IW4L_DISHONORED`, then `DISHONORED_DIR`, then the
@@ -45,10 +46,13 @@ who the characters are and what happens to them:
 - **Paired kills** turn the victim and set them in front of Corvo where the
   kill animation needs them, before they die. A plain kill (no room, or
   falling) leaves them where they stand.
-- The view follows the kill animation's camera, the swings and kills play
-  their own sounds, and a blade that hits a wall shakes the view. Under the
-  crosshair, the HUD shows **Assassinate** or **Drop assassination** with the
-  key bound to fire.
+- The view follows the kill animation's camera and the game's camera
+  animations, the swings and kills play their own sounds, and a blade that
+  hits a wall shakes the view. Each blow gets the game's contact sound and
+  effect for what it struck (blood on a player; the wall's material from MW2's
+  surface types), and blood can land on the lens. Under the crosshair, the
+  HUD shows **Assassinate** or **Drop assassination** with the key bound to
+  fire.
 
 | piece | where |
 |---|---|

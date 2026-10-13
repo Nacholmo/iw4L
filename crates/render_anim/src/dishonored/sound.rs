@@ -46,10 +46,8 @@ fn ogg_to_clip(ogg: &[u8]) -> Result<ExternalClip, String> {
 pub struct Sfx {
     rng: u64,
     step_accum: f32,
-    climb_accum: f32,
     sprint_time: f32,
     breath_timer: f32,
-    swim_timer: f32,
     prev_state: MotionState,
     prev_crouched: bool,
     warmup: Vec<ExternalSound>,
@@ -62,10 +60,8 @@ impl Default for Sfx {
         Self {
             rng: 0x9E37_79B9_7F4A_7C15,
             step_accum: 0.0,
-            climb_accum: 0.0,
             sprint_time: 0.0,
             breath_timer: 0.0,
-            swim_timer: 0.0,
             prev_state: MotionState::Falling,
             prev_crouched: false,
             warmup: Vec::new(),
@@ -126,6 +122,11 @@ impl Sfx {
         self.play_node(bank, runtime, bank.events.get(event), volume);
     }
 
+    /// A uniform roll in `0..1`.
+    pub fn chance(&mut self) -> f32 {
+        self.rand(1000) as f32 / 1000.0
+    }
+
     pub fn silence(&mut self) {
         for s in self.warmup.drain(..).chain(self.fall_wind.drain(..)) {
             s.stop();
@@ -162,19 +163,11 @@ impl Sfx {
         } else if m.state != MotionState::Walking {
             self.step_accum = 75.0;
         }
-        if m.state == MotionState::Ladder {
-            self.climb_accum += f.moved.z.abs();
-            if self.climb_accum >= 45.0 {
-                self.climb_accum = 0.0;
-                self.play(f, Cue::Footstep(Surface::Metal, Gait::Sneak), 0.5);
-            }
+        if ev.climb_sound {
+            self.play(f, Cue::Footstep(Surface::Metal, Gait::Sneak), 0.5);
         }
-        if m.state == MotionState::Swimming && moved > 0.5 {
-            self.swim_timer -= f.dt;
-            if self.swim_timer <= 0.0 {
-                self.swim_timer = 1.1;
-                self.play(f, Cue::Swim, 0.6);
-            }
+        if ev.swim_stroke || ev.surface_swim_sound {
+            self.play(f, Cue::Swim, 0.6);
         }
 
         if ev.jumped {

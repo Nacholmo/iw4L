@@ -45,7 +45,8 @@ const MESH_VERTEX_BYTES: u64 = 32;
 const SPRITE_VERTEX_BYTES: u64 = 36;
 
 struct Draw {
-    texture: usize,
+    /// The texture's cache key: its address, and whether it is clamped.
+    texture: (usize, bool),
     vertices: Buffer,
     indices: Buffer,
     count: u32,
@@ -68,8 +69,11 @@ struct DishonoredGpu {
     view: Option<Buffer>,
     view_bind: Option<BindGroup>,
     sampler: Option<Sampler>,
+    /// Particles sample clamped, as the engine draws them; a repeating sampler would bleed each
+    /// sprite's opposite edge into its border.
+    clamp_sampler: Option<Sampler>,
     white: Option<Arc<DishonoredTexture>>,
-    textures: HashMap<usize, (Arc<DishonoredTexture>, BindGroup)>,
+    textures: HashMap<(usize, bool), (Arc<DishonoredTexture>, BindGroup)>,
     draws: Vec<(Pass, Draw)>,
     pipelines: HashMap<(TextureFormat, u32), HashMap<Pass, RenderPipeline>>,
 }
@@ -175,6 +179,15 @@ fn prepare(
             mipmap_filter: MipmapFilterMode::Linear,
             ..default()
         }));
+        gpu.clamp_sampler = Some(device.create_sampler(&SamplerDescriptor {
+            label: Some("iw4l_dishonored_sprites"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: MipmapFilterMode::Linear,
+            ..default()
+        }));
         gpu.white = Some(Arc::new(DishonoredTexture {
             width: 1,
             height: 1,
@@ -184,35 +197,44 @@ fn prepare(
     }
     let white = gpu.white.clone().expect("white texture");
     let draw = &mut frame.0;
-    let texture_key = |texture: &Arc<DishonoredTexture>, gpu: &mut DishonoredGpu| -> usize {
-        let key = Arc::as_ptr(texture) as usize;
-        if !gpu.textures.contains_key(&key) {
-            let view = upload(&device, &queue, texture);
-            let layout = registry.bind_group_layout(&device, &texture_layout());
-            let bind = device.create_bind_group(
-                "iw4l_dishonored_texture",
-                &layout,
-                &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::Sampler(gpu.sampler.as_ref().expect("sampler")),
-                    },
-                ],
-            );
-            gpu.textures.insert(key, (texture.clone(), bind));
-        }
-        key
-    };
-    texture_key(&white, gpu);
+    let texture_key =
+        |texture: &Arc<DishonoredTexture>, clamp: bool, gpu: &mut DishonoredGpu| -> (usize, bool) {
+            let key = (Arc::as_ptr(texture) as usize, clamp);
+            if !gpu.textures.contains_key(&key) {
+                let view = upload(&device, &queue, texture);
+                let layout = registry.bind_group_layout(&device, &texture_layout());
+                let bind = device.create_bind_group(
+                    "iw4l_dishonored_texture",
+                    &layout,
+                    &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: BindingResource::TextureView(&view),
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: BindingResource::Sampler(
+                                if clamp {
+                                    &gpu.clamp_sampler
+                                } else {
+                                    &gpu.sampler
+                                }
+                                .as_ref()
+                                .expect("sampler"),
+                            ),
+                        },
+                    ],
+                );
+                gpu.textures.insert(key, (texture.clone(), bind));
+            }
+            key
+        };
+    texture_key(&white, false, gpu);
     for mesh in std::mem::take(&mut draw.meshes) {
         if mesh.vertices.is_empty() || mesh.indices.is_empty() {
             continue;
         }
-        let texture = texture_key(mesh.texture.as_ref().unwrap_or(&white), gpu);
+        let texture = texture_key(mesh.texture.as_ref().unwrap_or(&white), false, gpu);
         gpu.draws.push((
             Pass::Mesh,
             Draw {
@@ -237,7 +259,7 @@ fn prepare(
         if sprite.indices.is_empty() {
             continue;
         }
-        let texture = texture_key(&sprite.texture, gpu);
+        let texture = texture_key(&sprite.texture, true, gpu);
         let pass = match (sprite.view_space, sprite.additive) {
             (false, true) => Pass::WorldAdd,
             (false, false) => Pass::WorldAlpha,
@@ -404,7 +426,7 @@ fn draw(
         && let Some((_, bind)) = gpu
             .white
             .as_ref()
-            .and_then(|w| gpu.textures.get(&(Arc::as_ptr(w) as usize)))
+            .and_then(|w| gpu.textures.get(&(Arc::as_ptr(w) as usize, false)))
     {
         let (x, y, w, h, lo, hi) = band(GFX_DEPTH_RANGE_VIEWMODEL);
         pass.set_viewport(x, y, w, h, lo, hi);

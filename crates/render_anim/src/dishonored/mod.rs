@@ -19,7 +19,9 @@ use glam::Affine3A;
 use fx::{Attach, FxWorld};
 use hands::Hands;
 use pawns::{Character, Pawns, actor_of, client_of};
-use world::{LadderCache, MapWorld, angles_from_iw, angles_to_iw, from_iw, surface_below, to_iw};
+use world::{
+    LadderCache, MapWorld, angles_from_iw, angles_to_iw, from_iw, surface_at, surface_below, to_iw,
+};
 
 /// How long the view takes to settle onto a kill animation's camera.
 const TAKEDOWN_EASE: f32 = 0.3;
@@ -30,6 +32,7 @@ struct Loaded {
     sounds: sound::SoundBank,
     viewmodel: Option<dis_data::viewmodel::ViewModel>,
     effects: dis_data::effects::Effects,
+    contacts: dis_data::contact::SwordContacts,
     source: String,
 }
 
@@ -57,6 +60,7 @@ struct Dishonored {
     blink_level: usize,
     time: f32,
     npc_health: f32,
+    contacts: Option<dis_data::contact::SwordContacts>,
     /// The view when a kill animation took it over, eased from.
     ease_from: Option<Transform>,
 }
@@ -125,9 +129,19 @@ fn load() -> Result<Loaded, String> {
     if let Some(vm) = &viewmodel {
         sounds.add_events(&install, posted_events(&data, vm));
     }
+    let contacts = data.sword_contacts.clone();
+    sounds.add_events(&install, contacts.sounds().collect::<Vec<_>>());
     warnings.extend(sounds.warnings.iter().cloned());
     let sounds = sound::decode(sounds, &mut warnings);
-    let effects = dis_data::effects::load_effects(&install);
+    // Contact effects and the kill animations' lens effects load by path.
+    let mut extra: Vec<String> = contacts.particles().collect();
+    extra.extend(
+        viewmodel
+            .iter()
+            .flat_map(|vm| vm.lens_notifies.values().flatten())
+            .map(|(_, system)| system.clone()),
+    );
+    let effects = dis_data::effects::load_effects(&install, &extra);
     warnings.extend(effects.warnings.iter().cloned());
     for w in &warnings {
         diag::warn!(World, "Dishonored: {w}");
@@ -144,6 +158,7 @@ fn load() -> Result<Loaded, String> {
         sounds,
         viewmodel,
         effects,
+        contacts,
         source: format!("{} ({difficulty:?})", install.display()),
     })
 }
@@ -195,12 +210,10 @@ fn read_input(
     if stick.length() > 0.2 {
         move_axis = stick.clamp_length_max(1.0);
     }
-    let bumpers = pad.map_or(0.0, |pad| {
-        axis(
-            pad.pressed(GamepadButton::RightTrigger),
-            pad.pressed(GamepadButton::LeftTrigger),
-        )
-    });
+    let (lean_left, lean_right) = (
+        keys.pressed(KeyCode::KeyQ) || pad.is_some_and(|p| p.pressed(GamepadButton::LeftTrigger)),
+        keys.pressed(KeyCode::KeyE) || pad.is_some_and(|p| p.pressed(GamepadButton::RightTrigger)),
+    );
     dis_motion::Input {
         move_axis,
         look: Vec2::ZERO,
@@ -212,8 +225,9 @@ fn read_input(
             || keys.pressed(KeyCode::KeyC),
         sprint: kb.sprint.active || kb.holdbreath.active,
         walk: keys.pressed(KeyCode::AltLeft),
-        lean: (axis(keys.pressed(KeyCode::KeyE), keys.pressed(KeyCode::KeyQ)) + bumpers)
-            .clamp(-1.0, 1.0),
+        // Both lean buttons together lean forward.
+        lean: axis(lean_right, lean_left),
+        lean_forward: lean_left && lean_right,
         blink: kb.speed.active || mouse.pressed(MouseButton::Right) || keys.pressed(KeyCode::KeyF),
         attack: kb.attack.active,
     }
@@ -281,6 +295,7 @@ fn update(
             Ok(loaded) => {
                 dis.tuning = Some(loaded.tuning);
                 dis.npc_health = loaded.npc_health;
+                dis.contacts = Some(loaded.contacts);
                 dis.sounds = Some(loaded.sounds);
                 dis.hands = loaded.viewmodel.map(Hands::new);
                 dis.fx = Some(FxWorld::new(loaded.effects));
@@ -381,9 +396,9 @@ fn update(
     let corvo_eye = to_iw(motion.camera.eye);
     let npc_health = dis.npc_health;
     let before = motion.pos;
-    let view_before = (motion.yaw, motion.pitch);
+    let state_before = motion.state;
     let ladders = RefCell::new(std::mem::take(&mut dis.ladders));
-    let (events, surface, water_z) = authority.0.with_player_clip(local.0, |trace| {
+    let (events, surface, water_z, struck) = authority.0.with_player_clip(local.0, |trace| {
         let pawns: Pawns = characters
             .iter()
             .map(|c| {
@@ -407,7 +422,16 @@ fn update(
         let events = motion.update(&map, &input, dt);
         let surface = surface_below(trace, motion.feet());
         let water_z = dis_motion::World::water(&map, motion.pos).map(|w| w.surface_z);
-        (events, surface, water_z)
+        // What each wall strike hit, for its contact effect.
+        let struck: Vec<_> = events
+            .melee
+            .iter()
+            .map(|e| match e {
+                MeleeEvent::EnvHit { point, normal, .. } => surface_at(trace, *point, *normal),
+                _ => None,
+            })
+            .collect();
+        (events, surface, water_z, struck)
     });
     dis.ladders = ladders.into_inner();
     let moved = motion.pos - before;
@@ -419,13 +443,19 @@ fn update(
     let feet = to_iw(motion.feet());
     authority.0.set_origin(local.0, feet.to_array());
     let (iw_yaw, iw_pitch) = angles_to_iw(motion.yaw, motion.pitch);
-    if events.drop_assassination.is_some() || events.assassination.is_some() {
-        // The kill turned Corvo: carry the player's look over to where he now faces.
-        let (yaw0, pitch0) = angles_to_iw(view_before.0, view_before.1);
+    let kill_ended = state_before == MotionState::Takedown && motion.state != MotionState::Takedown;
+    if events.drop_assassination.is_some() || events.assassination.is_some() || kill_ended {
+        // A kill turns Corvo when it starts and sets his view when it ends: carry the player's
+        // look over to it.
         let turn = |a: f32, b: f32| (a - b + 540.0).rem_euclid(360.0) - 180.0;
-        authority
-            .0
-            .turn_view(local.0, [turn(iw_pitch, pitch0), turn(iw_yaw, yaw0), 0.0]);
+        authority.0.turn_view(
+            local.0,
+            [
+                turn(iw_pitch, ps.viewangles[0]),
+                turn(iw_yaw, ps.viewangles[1]),
+                0.0,
+            ],
+        );
     }
     authority.0.set_viewangles(local.0, [iw_pitch, iw_yaw, 0.0]);
     strike(&mut authority.0, local.0, &characters, &events, npc_health);
@@ -452,7 +482,7 @@ fn update(
     let mut meshes = Vec::new();
     let mut sprites = Vec::new();
     if let Some(fxw) = dis.fx.as_mut() {
-        fxw.camera = fx::camera_basis(motion.camera.eye, motion.view_dir());
+        fxw.camera = fx::camera_basis(motion.camera.eye, motion.camera_dir());
         fx_triggers(
             &mut dis.fx_state,
             fxw,
@@ -471,12 +501,27 @@ fn update(
                     dis.sfx.post(bank, runtime.as_deref(), &event, volume);
                 }
             }
+            // The kill animations' own lens effects (blood on the lens at the blow).
+            for system in hands.posted_lenses.drain(..) {
+                if let Some(def) = fxw.by_path(&system) {
+                    fxw.spawn_def(def, Affine3A::IDENTITY, Attach::Camera);
+                }
+            }
+        }
+        if let (Some(contacts), Some(bank)) = (dis.contacts.as_ref(), dis.sounds.as_ref()) {
+            let audio = (&mut dis.sfx, bank, runtime.as_deref());
+            sword_contacts(contacts, fxw, audio, motion, &events, &struck);
         }
         sprites = fxw.update(dt);
     }
 
     let eye = to_iw(motion.camera.eye);
-    let mut angles = [iw_pitch, iw_yaw, motion.camera.roll.to_degrees()];
+    // The view is turned by the camera animations on top of where Corvo aims.
+    let (cam_yaw, cam_pitch) = angles_to_iw(
+        motion.yaw + motion.camera.anim_yaw,
+        motion.pitch + motion.camera.anim_pitch,
+    );
+    let mut angles = [cam_pitch, cam_yaw, motion.camera.roll.to_degrees()];
     if shake_left > 0.0 {
         let k = shake_strength * (shake_left / 0.35).powi(2) * 0.02;
         let t = dis.time * 40.0;
@@ -650,6 +695,10 @@ fn fx_triggers(
     } else if st.prev_state == Some(MotionState::Swimming) {
         fxw.spawn(Fx::CameraWater, Affine3A::IDENTITY, Attach::Camera);
     }
+    // A slide stopped dead by a wall.
+    if let Some(shake) = ev.slide_impact {
+        st.shake = (0.3, shake * 0.5);
+    }
     // The blade striking the world shakes the view, scaled from the game's shake strength.
     if let Some(MeleeEvent::EnvHit { shake, .. }) = ev
         .melee
@@ -660,6 +709,60 @@ fn fx_triggers(
     }
     st.prev_state = Some(m.state);
     st.shake.0 = (st.shake.0 - dt).max(0.0);
+}
+
+/// Sword hits: the contact table's sound, particle effect and lens effect for what was struck
+/// (the game's contact types; MW2 players are bodies).
+fn sword_contacts(
+    contacts: &dis_data::contact::SwordContacts,
+    fxw: &mut FxWorld,
+    (sfx, bank, runtime): (
+        &mut sound::Sfx,
+        &sound::SoundBank,
+        Option<&audio::AudioRuntime>,
+    ),
+    m: &Motion,
+    ev: &StepEvents,
+    struck: &[Option<dis_data::sounds::Surface>],
+) {
+    use dis_data::sounds::Surface;
+    const ENVIRONMENT: &str = "DisContactType_Environment";
+    for (e, surface) in ev.melee.iter().zip(struck) {
+        let (kind, point, normal) = match *e {
+            MeleeEvent::Hit { point, normal, .. } => ("DisContactType_Body", point, normal),
+            MeleeEvent::EnvHit { point, normal, .. } => {
+                let kind = match surface {
+                    Some(Surface::Stone) => "DisContactType_Env_Stone",
+                    Some(Surface::Wood) => "DisContactType_Env_Wood",
+                    Some(Surface::Metal) => "DisContactType_Env_Metal",
+                    Some(Surface::Rooftile) => "DisContactType_Env_Tile",
+                    Some(Surface::Gravel) => "DisContactType_Env_Gravel",
+                    Some(Surface::Water) => "DisContactType_Env_Water",
+                    None => ENVIRONMENT,
+                };
+                (kind, point, normal)
+            }
+            MeleeEvent::Swing { .. } => continue,
+        };
+        let Some(effect) = contacts.get(kind).or_else(|| contacts.get(ENVIRONMENT)) else {
+            continue;
+        };
+        if let Some(event) = &effect.sound {
+            sfx.post(bank, runtime, event, 0.8);
+        }
+        if let Some(def) = effect.particle.as_deref().and_then(|p| fxw.by_path(p)) {
+            let line = point - m.camera.eye;
+            let t = fx::contact_transform(&effect.orient, point, normal, line, m.view_dir());
+            fxw.spawn_def(def, t, Attach::World);
+        }
+        if let Some(lens) = &effect.lens
+            && m.camera.eye.distance(point) <= lens.distance
+            && sfx.chance() < lens.probability
+            && let Some(def) = fxw.by_path(&lens.particle)
+        {
+            fxw.spawn_def(def, Affine3A::IDENTITY, Attach::Camera);
+        }
+    }
 }
 
 /// The other living players, as the sword and the kills see them.
@@ -712,6 +815,7 @@ fn strike(
             target,
             damage,
             killing,
+            ..
         } = e
         else {
             continue;

@@ -19,6 +19,9 @@ const OWN_SOUNDS: [&str; 4] = [
 ];
 const BLEND: f32 = 0.18;
 
+/// Particle, sound and lens-effect notifies a track passed.
+type Notifies = (Vec<ParticleNotify>, Vec<SoundNotify>, Vec<String>);
+
 #[derive(Clone, PartialEq)]
 struct Track {
     name: String,
@@ -59,9 +62,10 @@ impl Layer {
         self.time = 0.0;
     }
 
-    fn advance(&mut self, dt: f32, vm: &ViewModel) -> (Vec<ParticleNotify>, Vec<SoundNotify>) {
+    fn advance(&mut self, dt: f32, vm: &ViewModel) -> Notifies {
         let mut fired = Vec::new();
         let mut sounds = Vec::new();
+        let mut lenses = Vec::new();
         if let Some(t) = &self.current
             && let Some(a) = vm.anims.get(&t.name)
         {
@@ -77,6 +81,11 @@ impl Layer {
             for n in vm.particle_notifies.get(&t.name).into_iter().flatten() {
                 if passed(n.time) {
                     fired.push(n.clone());
+                }
+            }
+            for (time, system) in vm.lens_notifies.get(&t.name).into_iter().flatten() {
+                if passed(*time) {
+                    lenses.push(system.clone());
                 }
             }
             if OWN_SOUNDS.iter().any(|p| t.name.starts_with(p)) {
@@ -95,7 +104,7 @@ impl Layer {
         if self.fade <= 0.0 {
             self.previous = None;
         }
-        (fired, sounds)
+        (fired, sounds, lenses)
     }
 
     fn done(&self, vm: &ViewModel) -> bool {
@@ -136,6 +145,8 @@ pub struct Hands {
     pub cam_offset: Option<(Vec3, Quat)>,
     /// Sounds the kill and swing animations posted this frame (event, volume).
     pub posted_sounds: Vec<(String, f32)>,
+    /// Lens effects (particle systems, by path) the animations started this frame.
+    pub posted_lenses: Vec<String>,
 }
 
 pub fn texture_with_mips(width: u32, height: u32, rgba: &[u8], srgb: bool) -> DishonoredTexture {
@@ -292,6 +303,7 @@ impl Hands {
             rest_cam,
             cam_offset: None,
             posted_sounds: Vec::new(),
+            posted_lenses: Vec::new(),
             vm,
         }
     }
@@ -405,8 +417,9 @@ impl Hands {
         }
         self.prev_blink = blink;
         self.prev_state = m.state;
-        let (mut fired, sounds) = self.base.advance(dt, &self.vm);
+        let (mut fired, sounds, lenses) = self.base.advance(dt, &self.vm);
         fired.extend(self.left.advance(dt, &self.vm).0);
+        self.posted_lenses.extend(lenses);
         self.posted_sounds
             .extend(sounds.into_iter().map(|n| (n.event, n.volume)));
 

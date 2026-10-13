@@ -162,6 +162,7 @@ impl dis_motion::World for MapWorld<'_> {
                 normal: dis_motion::Vec3::new(flat.x, -flat.y, 0.0),
                 bottom_z: bottom * CM_PER_INCH,
                 top_z: top * CM_PER_INCH,
+                grip: from_iw(Vec3::from_array(hit.endpos)),
             });
         }
         None
@@ -184,28 +185,49 @@ pub fn surface_below(
     if water.startsolid != 0 || water.allsolid != 0 {
         return Surface::Water;
     }
+    surface_along(trace, p + Vec3::Z * 4.0, p - Vec3::Z * 16.0).unwrap_or(Surface::Stone)
+}
+
+/// What a sword struck at `point` (Unreal space) is made of, looking into the surface.
+pub fn surface_at(
+    trace: &dyn Fn(GroundTraceInput) -> Trace,
+    point: dis_motion::Vec3,
+    normal: dis_motion::Vec3,
+) -> Option<dis_data::sounds::Surface> {
+    let (p, n) = (to_iw(point), to_iw(normal).normalize_or_zero());
+    surface_along(trace, p + n * 4.0, p - n * 16.0)
+}
+
+fn surface_along(
+    trace: &dyn Fn(GroundTraceInput) -> Trace,
+    start: Vec3,
+    end: Vec3,
+) -> Option<dis_data::sounds::Surface> {
+    use dis_data::sounds::Surface;
     let t = trace(GroundTraceInput {
-        start: (p + Vec3::Z * 4.0).to_array(),
-        end: (p - Vec3::Z * 16.0).to_array(),
+        start: start.to_array(),
+        end: end.to_array(),
         mins: [0.0; 3],
         maxs: [0.0; 3],
         tracemask: MASK_PLAYER_SOLID,
     });
     if t.fraction >= 1.0 {
-        return Surface::Stone;
+        return None;
     }
-    match movement_iw4::SURFACE_TYPE_NAMES
-        .get((t.surface_flags >> 20) as usize & 0x1f)
-        .copied()
-        .unwrap_or("default")
-    {
-        "metal" | "paintedmetal" => Surface::Metal,
-        "wood" | "bark" => Surface::Wood,
-        "dirt" | "gravel" | "sand" | "mud" | "grass" | "foliage" | "snow" | "slush" => {
-            Surface::Gravel
-        }
-        "water" => Surface::Water,
-        "ceramic" => Surface::Rooftile,
-        _ => Surface::Stone,
-    }
+    Some(
+        match movement_iw4::SURFACE_TYPE_NAMES
+            .get((t.surface_flags >> 20) as usize & 0x1f)
+            .copied()
+            .unwrap_or("default")
+        {
+            "metal" | "paintedmetal" => Surface::Metal,
+            "wood" | "bark" => Surface::Wood,
+            "dirt" | "gravel" | "sand" | "mud" | "grass" | "foliage" | "snow" | "slush" => {
+                Surface::Gravel
+            }
+            "water" => Surface::Water,
+            "ceramic" => Surface::Rooftile,
+            _ => Surface::Stone,
+        },
+    )
 }

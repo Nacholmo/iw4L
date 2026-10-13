@@ -2140,8 +2140,8 @@ dependencies = [
 
 [[package]]
 name = "cascade"
-version = "0.2.0"
-source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.2.0#992dfadaf676e87f026a9c16fbc5f43dbef5d242"
+version = "0.4.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.4.0#d3071eb896369ce9f6220f0a703ff5f533979b06"
 dependencies = [
  "glam",
  "upk",
@@ -2624,8 +2624,8 @@ dependencies = [
 
 [[package]]
 name = "dis_data"
-version = "0.2.0"
-source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.2.0#992dfadaf676e87f026a9c16fbc5f43dbef5d242"
+version = "0.4.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.4.0#d3071eb896369ce9f6220f0a703ff5f533979b06"
 dependencies = [
  "cascade",
  "edge_anim",
@@ -2636,8 +2636,8 @@ dependencies = [
 
 [[package]]
 name = "dis_motion"
-version = "0.2.0"
-source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.2.0#992dfadaf676e87f026a9c16fbc5f43dbef5d242"
+version = "0.4.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.4.0#d3071eb896369ce9f6220f0a703ff5f533979b06"
 dependencies = [
  "dis_data",
  "glam",
@@ -2734,8 +2734,8 @@ version = "0.1.0"
 
 [[package]]
 name = "edge_anim"
-version = "0.2.0"
-source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.2.0#992dfadaf676e87f026a9c16fbc5f43dbef5d242"
+version = "0.4.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.4.0#d3071eb896369ce9f6220f0a703ff5f533979b06"
 dependencies = [
  "glam",
 ]
@@ -6929,8 +6929,8 @@ dependencies = [
 
 [[package]]
 name = "upk"
-version = "0.2.0"
-source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.2.0#992dfadaf676e87f026a9c16fbc5f43dbef5d242"
+version = "0.4.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.4.0#d3071eb896369ce9f6220f0a703ff5f533979b06"
 dependencies = [
  "lzokay-native",
 ]
@@ -7800,8 +7800,8 @@ dependencies = [
 
 [[package]]
 name = "wwise"
-version = "0.2.0"
-source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.2.0#992dfadaf676e87f026a9c16fbc5f43dbef5d242"
+version = "0.4.0"
+source = "git+https://github.com/Nacholmo/sinhonor?tag=v0.4.0#d3071eb896369ce9f6220f0a703ff5f533979b06"
 dependencies = [
  "lewton",
  "ww2ogg",
